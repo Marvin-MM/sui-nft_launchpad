@@ -79,12 +79,12 @@ export default function Navbar() {
             <ConnectModal
               trigger={
                 <button className={cn(
-                  "px-8 py-3 text-[10px] font-medium uppercase tracking-[0.4em] transition-all duration-500 border",
+                  "px-8 py-3 text-[10px] font-medium uppercase tracking-[0.4em] transition-all duration-500 border rounded-full",
                   account 
                     ? "border-white/10 text-white/40 hover:text-white hover:border-white" 
                     : "bg-white text-black border-white hover:bg-black hover:text-white"
                 )}>
-                  {account ? account.address.slice(0, 6) + '...' + account.address.slice(-4) : 'INIT_AUTH'}
+                  {account ? account.address.slice(0, 6) + '...' + account.address.slice(-4) : 'connect_wallet'}
                 </button>
               }
             />
