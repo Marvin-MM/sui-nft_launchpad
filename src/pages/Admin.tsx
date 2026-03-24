@@ -1,0 +1,288 @@
+import { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClientQuery } from '@mysten/dapp-kit';
+import { Transaction } from '@mysten/sui/transactions';
+import { networkConfig, NETWORK, MIST_PER_SUI, PACKAGE_ID, MINT_CONFIG_ID } from '../lib/sui';
+import { 
+  Settings, ShieldAlert, Users, Coins, Percent, 
+  Pause, Play, Plus, Trash2, Loader2, Save, 
+  ArrowRight, Info, AlertTriangle, Upload, BarChart3, Terminal, Activity, Zap
+} from 'lucide-react';
+import { toast } from 'react-hot-toast';
+
+export default function Admin() {
+  const account = useCurrentAccount();
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('phases');
+
+  const { data: adminCapData, isLoading: checkingAdmin } = useSuiClientQuery(
+    'getOwnedObjects',
+    {
+      owner: account?.address || '',
+      filter: { StructType: `${PACKAGE_ID}::mint::AdminCap` },
+    },
+    { enabled: !!account }
+  );
+
+  const isAdmin = adminCapData?.data && adminCapData.data.length > 0;
+
+  const { data: mintConfig } = useSuiClientQuery(
+    'getObject',
+    {
+      id: MINT_CONFIG_ID,
+      options: { showContent: true },
+    }
+  );
+
+  const treasuryBalance = useMemo(() => {
+    const content = mintConfig?.data?.content as any;
+    if (!content) return '0.00';
+    const balanceMist = content.fields?.balance || 0;
+    return (Number(balanceMist) / Number(MIST_PER_SUI)).toFixed(2);
+  }, [mintConfig]);
+
+  const handleAction = async (action: string, params: any) => {
+    if (!account) return;
+    setLoading(true);
+    try {
+      const tx = new Transaction();
+      toast.success(`${action} sequence initialized (requires contract integration)`);
+    } catch (error) {
+      console.error(error);
+      toast.error('Protocol action failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (checkingAdmin) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-white/20" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center px-6 text-center space-y-12">
+        <div className="w-24 h-24 rounded-full border border-white/10 flex items-center justify-center text-white/20">
+          <ShieldAlert className="w-10 h-10" />
+        </div>
+        <div className="space-y-4 max-w-md">
+          <h2 className="text-4xl font-light tracking-tighter uppercase">AUTH_REVOKED</h2>
+          <p className="text-white/40 font-light leading-relaxed">
+            Administrative access denied. Sign-in with an authorized principal wallet containing the <span className="text-white">AdminCap</span> metadata.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[1600px] mx-auto min-h-screen border-x border-white/10 grid grid-cols-1 lg:grid-cols-12 bg-black">
+      {/* Sidebar Nav */}
+      <div className="lg:col-span-3 border-r border-white/10 p-12 lg:p-16 space-y-24 bg-white/1">
+        <div className="space-y-12">
+          <div className="flex items-center gap-4 text-white">
+             <Terminal className="w-4 h-4 text-white/40" />
+             <span className="text-[10px] font-medium tracking-[0.4em] uppercase">ADMIN_TERMINAL</span>
+          </div>
+          <div className="space-y-4">
+             {['PHASES', 'ALLOWLIST', 'FEES', 'ROYALTIES', 'AUCTIONS', 'SYSTEM'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab.toLowerCase())}
+                  className={`w-full group flex items-center justify-between py-2 border-b transition-all duration-500 uppercase tracking-[0.4em] text-[10px] ${
+                    activeTab === tab.toLowerCase() ? 'border-white text-white' : 'border-white/5 text-white/20 hover:text-white/40'
+                  }`}
+                >
+                  {tab}
+                  <ArrowRight className={`w-3 h-3 transition-transform ${activeTab === tab.toLowerCase() ? 'translate-x-0 opacity-100' : '-translate-x-2 opacity-0 group-hover:opacity-40'}`} />
+                </button>
+             ))}
+          </div>
+        </div>
+
+        <div className="space-y-12 pt-24 border-t border-white/10">
+           <div className="space-y-6">
+              <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">NETWORK_BALANCE</p>
+              <div className="space-y-2">
+                 <p className="text-4xl font-light tracking-tighter text-white">{treasuryBalance} <span className="text-sm text-white/20">SUI</span></p>
+              </div>
+              <button className="w-full py-4 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all">
+                WITHDRAW_FUNDS
+              </button>
+           </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="lg:col-span-9 p-12 lg:p-24 space-y-24">
+        <AnimatePresence mode="wait">
+          {activeTab === 'phases' && (
+            <motion.div
+              key="phases"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-24"
+            >
+              <div className="space-y-8">
+                <div className="flex items-center gap-4 text-emerald-500">
+                   <Activity className="w-4 h-4" />
+                   <span className="text-[10px] font-medium tracking-[0.4em] uppercase">MODULE_STATUS: VERIFIED</span>
+                </div>
+                <h1 className="text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+                  PHASE<br /><span className="text-white/20">SCHEDULER</span>
+                </h1>
+                <p className="text-xl text-white/40 font-light leading-relaxed max-w-2xl">
+                  Update the cryptographically enforced minting cycles. Changes are permanent upon finalization.
+                </p>
+              </div>
+
+              <div className="divide-y border border-white/10 divide-white/10 border-collapse">
+                {[
+                  { id: 0, name: 'Cycle 0: Preparation', desc: 'Protocol initialized. Public minting deactivated.', status: 'Inactive' },
+                  { id: 1, name: 'Cycle 1: Contributors', desc: 'White-signed identifiers only.', status: 'Active' },
+                  { id: 2, name: 'Cycle 2: Distribution', desc: 'Sui Network global access enabled.', status: 'Inactive' },
+                ].map((p) => (
+                  <div key={p.id} className="grid grid-cols-1 md:grid-cols-4 items-center p-12 hover:bg-white/1 transition-all group">
+                    <div className="md:col-span-2 space-y-4">
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">INDEX_0{p.id}</p>
+                        <h4 className="text-2xl font-light tracking-tight text-white uppercase">{p.name}</h4>
+                      </div>
+                      <p className="text-[11px] text-white/40 leading-relaxed font-light uppercase tracking-widest">{p.desc}</p>
+                    </div>
+                    <div className="flex justify-center">
+                      <div className={`px-4 py-1 border text-[9px] font-medium tracking-[0.4em] uppercase ${
+                        p.status === 'Active' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/5' : 'border-white/10 text-white/10'
+                      }`}>
+                        {p.status}
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={() => handleAction('Update Phase', { phase: p.id })}
+                        className="px-8 py-3 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all"
+                      >
+                        ACTIVATE
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'allowlist' && (
+            <motion.div
+              key="allowlist"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-24"
+            >
+              <div className="space-y-8">
+                <h1 className="text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+                  ROOT<br /><span className="text-white/20">VAULT</span>
+                </h1>
+                <p className="text-xl text-white/40 font-light leading-relaxed max-w-2xl uppercase">
+                  Manage the cryptographic Merkle root for allowlisted identifiers.
+                </p>
+              </div>
+
+              <div className="p-24 border-2 border-dashed border-white/5 bg-white/1 flex flex-col items-center justify-center space-y-12 text-center group hover:border-white transition-all">
+                <div className="w-20 h-20 rounded-full border border-white/10 flex items-center justify-center text-white/20 group-hover:text-white transition-all">
+                  <Upload className="w-8 h-8" />
+                </div>
+                <div className="space-y-4">
+                  <p className="text-2xl font-light tracking-tight text-white uppercase">INGEST_DATA_STREAM</p>
+                  <p className="text-[10px] text-white/20 font-medium uppercase tracking-[0.4em]">DROP .CSV FILE (SINGLE STREAM ADDRS)</p>
+                </div>
+                <button className="px-12 py-4 border border-white text-[10px] font-medium tracking-[0.4em] uppercase bg-white text-black hover:bg-black hover:text-white transition-all">
+                  SELECT_LOCAL_STREAM
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'fees' && (
+            <motion.div
+              key="fees"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-24"
+            >
+              <div className="space-y-8">
+                <h1 className="text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+                  FEE<br /><span className="text-white/20">ENGINE</span>
+                </h1>
+                <p className="text-sm font-light text-white/40 leading-relaxed max-w-xl uppercase tracking-[0.2em]">
+                  Adjust the economic parameters of the Genesis protocol distribution cycles.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 divide-x border border-white/10 divide-white/10 bg-white/1">
+                <div className="p-12 space-y-8 group">
+                  <label className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">CYCLE_1_VALUATION (SUI)</label>
+                  <div className="relative border-b border-white/10 group-focus-within:border-white transition-all">
+                    <input type="number" defaultValue="1.0" className="w-full py-4 bg-transparent focus:outline-none font-light text-6xl tracking-tighter text-white" />
+                    <span className="absolute right-0 bottom-4 text-white/10 font-light text-xl uppercase tracking-widest">SUI</span>
+                  </div>
+                </div>
+                <div className="p-12 space-y-8 group">
+                  <label className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">CYCLE_2_VALUATION (SUI)</label>
+                  <div className="relative border-b border-white/10 group-focus-within:border-white transition-all">
+                    <input type="number" defaultValue="2.0" className="w-full py-4 bg-transparent focus:outline-none font-light text-6xl tracking-tighter text-white" />
+                    <span className="absolute right-0 bottom-4 text-white/10 font-light text-xl uppercase tracking-widest">SUI</span>
+                  </div>
+                </div>
+              </div>
+
+              <button className="w-full py-8 border border-white text-[11px] font-medium tracking-[0.6em] uppercase hover:bg-white hover:text-black transition-all">
+                UPDATE_FINANCIAL_CONSTRAINTS
+              </button>
+            </motion.div>
+          )}
+
+          {activeTab === 'system' && (
+            <motion.div
+              key="system"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-24"
+            >
+              <div className="space-y-8">
+                <h1 className="text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+                  SYSTEM<br /><span className="text-white/20">SECURITY</span>
+                </h1>
+                <p className="text-sm font-light text-white/40 leading-relaxed max-w-xl uppercase tracking-[0.2em]">
+                  Emergency protocols and cryptographic collection lifecycle management.
+                </p>
+              </div>
+
+              <div className="p-12 border border-red-500/20 bg-red-500/2 flex flex-col md:flex-row items-center justify-between gap-12">
+                <div className="space-y-4 flex-1">
+                  <div className="flex items-center gap-4 text-red-500">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="text-[10px] font-medium tracking-[0.4em] uppercase">PRIORITY_ALPHA: TERMINATION</span>
+                  </div>
+                  <p className="text-xs text-white/40 font-light leading-relaxed uppercase tracking-widest">
+                    immediate cessation of protocol operations. all distribution cycles will be frozen permanently.
+                  </p>
+                </div>
+                <button className="px-16 py-6 bg-red-500 text-white text-[11px] font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-red-500 border border-red-500 transition-all flex items-center gap-4">
+                  <Pause className="w-4 h-4" />
+                  EXECUTE_HALT
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
