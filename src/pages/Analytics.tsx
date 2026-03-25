@@ -150,27 +150,27 @@ export default function Analytics() {
     <div className="min-h-screen bg-black text-white selection:bg-accent-primary/30">
       <div className="max-w-[1600px] mx-auto border-x border-white/10 min-h-screen">
         {/* Header Section */}
-        <div className="p-12 border-b border-white/10 space-y-8">
-          <div className="flex flex-col md:flex-row items-end justify-between gap-8">
+        <div className="p-6 md:p-12 border-b border-white/10 space-y-8">
+          <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-8">
             <div className="space-y-4">
               <p className="text-[10px] font-bold uppercase tracking-[0.4em] opacity-50">Sui Genesis Network</p>
-              <h1 className="text-8xl font-black tracking-tighter leading-none uppercase italic">
+              <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-none uppercase italic">
                 ANALYTICS<br />
                 <span className="text-white/20">TERMINAL</span>
               </h1>
             </div>
-            <div className="flex items-center gap-12 pb-4">
-              <div className="space-y-1">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 md:gap-12 pb-4 w-full md:w-auto">
+              <div className="space-y-1 w-full sm:w-auto">
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-50">Network Status</p>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
-                  <p className="text-xl font-mono uppercase tracking-widest">Mainnet-v1.0</p>
+                  <p className="text-lg md:text-xl font-mono uppercase tracking-widest">Mainnet-v1.0</p>
                 </div>
               </div>
               <button 
                 onClick={getAiSummary}
                 disabled={loadingAI}
-                className="px-8 py-4 border border-white/20 text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all flex items-center gap-3"
+                className="w-full sm:w-auto px-6 md:px-8 py-3 md:py-4 border border-white/20 text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3"
               >
                 {loadingAI ? <Loader2 className="w-5 h-5 animate-spin" /> : <Brain className="w-5 h-5" />}
                 {aiSummary ? 'REFRESH AI' : 'GENERATE AI'}
@@ -180,7 +180,7 @@ export default function Analytics() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-6 divide-x divide-y md:divide-y-0 divide-white/10 border-b border-white/10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-white/10 border-b border-white/10">
           {[
             { label: 'Total Minted', value: stats.minted.toLocaleString(), suffix: '/ 10,000' },
             { label: 'Total Supply', value: stats.total.toLocaleString(), suffix: 'NFTs' },
@@ -189,10 +189,10 @@ export default function Analytics() {
             { label: 'Royalties', value: (stats.volume * 0.05).toFixed(2), suffix: 'SUI' },
             { label: 'Holders', value: Math.floor(stats.minted * 0.22).toLocaleString(), suffix: 'Wallets' },
           ].map((stat) => (
-            <div key={stat.label} className="p-8 space-y-4 hover:bg-white/5 transition-colors group">
+            <div key={stat.label} className="p-6 md:p-8 space-y-4 hover:bg-white/5 transition-colors group">
               <p className="text-[10px] font-serif italic uppercase tracking-widest opacity-50 group-hover:opacity-70">{stat.label}</p>
               <div className="space-y-1">
-                <h2 className="text-3xl font-mono tracking-tighter leading-none">{stat.value}</h2>
+                <h2 className="text-2xl md:text-3xl font-mono tracking-tighter leading-none">{stat.value}</h2>
                 <p className="text-[10px] font-mono opacity-40 group-hover:opacity-60 uppercase tracking-widest">{stat.suffix}</p>
               </div>
             </div>

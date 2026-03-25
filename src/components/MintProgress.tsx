@@ -20,19 +20,19 @@ export default function MintProgress() {
 
   return (
     <div className="w-full space-y-8">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6 sm:gap-0">
         <div className="space-y-2">
           <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/40">Total Minted Assets</p>
           <div className="flex items-baseline gap-4">
-            <h2 className="text-6xl font-light tracking-tighter text-white">
+            <h2 className="text-4xl md:text-6xl font-light tracking-tighter text-white">
               {mintedCount.toLocaleString()}
             </h2>
-            <span className="text-xl font-light text-white/10">OF {maxSupply.toLocaleString()}</span>
+            <span className="text-lg md:text-xl font-light text-white/10">OF {maxSupply.toLocaleString()}</span>
           </div>
         </div>
-        <div className="text-right space-y-2">
+        <div className="text-left sm:text-right space-y-2">
           <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/40">Efficiency</p>
-          <p className="text-4xl font-light tracking-tighter text-white">{progress.toFixed(1)}%</p>
+          <p className="text-3xl md:text-4xl font-light tracking-tighter text-white">{progress.toFixed(1)}%</p>
         </div>
       </div>
       

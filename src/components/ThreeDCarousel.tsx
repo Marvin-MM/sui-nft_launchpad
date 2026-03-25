@@ -73,7 +73,7 @@ export default function ThreeDCarousel() {
                 }}
                 exit={{ opacity: 0, scale: 0.5, z: -500 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 25 }}
-                className="absolute inset-0 rounded-2xl overflow-hidden bg-black border border-white/10"
+                className="absolute inset-0 bg-black border border-white/10"
                 style={{ backfaceVisibility: 'hidden' }}
               >
                 <img 
@@ -82,7 +82,7 @@ export default function ThreeDCarousel() {
                   className="w-full h-full object-cover select-none transition-all duration-1000"
                 />
                 
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent flex flex-col justify-end p-8 md:p-12">
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent flex flex-col justify-end p-8 md:p-12">
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: isActive ? 1 : 0, y: isActive ? 0 : 10 }}
@@ -91,11 +91,11 @@ export default function ThreeDCarousel() {
                     <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase mb-4">
                       {nft.rarity} ASSET
                     </p>
-                    <h3 className="text-4xl md:text-5xl font-light tracking-tighter text-white mb-6">
+                    <h3 className="text-4xl md:text-5xl font-light tracking-[-0.05em] text-white mb-6 uppercase">
                       {nft.title}
                     </h3>
-                    <div className="h-px w-full bg-white/10 mb-6" />
-                    <div className="flex justify-between items-center text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">
+                    <div className="h-px w-full bg-white/20 mb-6" />
+                    <div className="flex justify-between items-center text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">
                       <span>GENESIS PROTOCOL</span>
                       <span>EDITION 001/001</span>
                     </div>

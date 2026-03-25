@@ -4,6 +4,7 @@ import ThreeDCarousel from '../components/ThreeDCarousel';
 import ParticleField from '../components/ParticleField';
 import MintProgress from '../components/MintProgress';
 import PhaseStatus from '../components/PhaseStatus';
+import LiveActivityFeed from '../components/LiveActivityFeed';
 import RarityGrid from '../components/RarityGrid';
 import { ChevronDown, ArrowRight, Shield, Zap, Globe, Users, Cpu, Lock, Layers, Terminal, Activity, Disc as Discord, Twitter } from 'lucide-react';
 
@@ -33,7 +34,7 @@ export default function Landing() {
                 <Terminal className="w-4 h-4" />
                 <span className="text-[10px] font-medium tracking-[0.5em] uppercase">SUI GENESIS PROTOCOL v1.0.4</span>
               </div>
-              <h1 className="text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+              <h1 className="text-6xl sm:text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
                 DIGITAL<br />
                 <span className="text-white/20">PRESTIGE</span>
               </h1>
@@ -56,7 +57,7 @@ export default function Landing() {
               className="flex flex-col sm:flex-row items-center gap-8"
             >
               <Link to="/mint" className="group flex items-center gap-4">
-                <div className="px-12 py-5 rounded-full bg-white text-black font-medium tracking-widest uppercase hover:bg-black hover:text-white border border-white transition-all duration-300">
+                <div className="px-8 md:px-12 py-4 md:py-5 rounded-full bg-white text-black font-medium tracking-widest uppercase hover:bg-black hover:text-white border border-white transition-all duration-300">
                   MINT ACCESS
                 </div>
                 <div className="w-12 h-12 rounded-full border border-white/20 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-all">
@@ -75,7 +76,7 @@ export default function Landing() {
               transition={{ delay: 0.6 }}
               className="pt-12 border-t border-white/10"
             >
-              <div className="grid grid-cols-3 gap-12">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 md:gap-12">
                 {[
                   { label: 'FLOOR', value: '1.25 SUI' },
                   { label: 'OWNERS', value: '2,408' },
@@ -98,55 +99,59 @@ export default function Landing() {
       </section>
 
       {/* Network Trust Bar */}
-      <section className="py-16 border-b border-white/10 overflow-hidden">
-        <div className="max-w-[1600px] mx-auto px-6 flex flex-wrap justify-between items-center gap-12 opacity-20 hover:opacity-100 transition-opacity duration-700">
-          {['SUI NETWORK', 'MYSTEN LABS', 'MOVE LANG', 'GENESIS DAO', 'CYBERSEC'].map((brand) => (
-            <span key={brand} className="text-lg font-light tracking-[0.3em] text-white uppercase whitespace-nowrap">{brand}</span>
+      <section className="py-12 md:py-16 border-b border-white/10 overflow-hidden">
+        <div className="max-w-[1600px] mx-auto px-6 md:px-12 flex flex-wrap justify-between items-center gap-8 md:gap-12 opacity-30 hover:opacity-100 transition-opacity duration-700">
+          {['SUI NETWORK', 'MYSTEN LABS', 'MOVE LANG', 'GENESIS DAO', 'CYBERSEC'].map((brand, i) => (
+            <div key={brand} className="flex items-center gap-8 md:gap-12 w-full sm:w-auto justify-between sm:justify-start">
+              <span className="text-xs md:text-sm font-medium tracking-[0.4em] text-white uppercase whitespace-nowrap">{brand}</span>
+              {i < 4 && <div className="hidden sm:block w-px h-4 bg-white/20" />}
+            </div>
           ))}
         </div>
       </section>
 
       {/* Live Activity Section */}
-      <section className="border-b border-white/10">
-        <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 divide-x divide-white/10 border-x border-white/10">
-          <div className="lg:col-span-6 p-12 space-y-12">
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 text-emerald-500">
+      <section className="border-b border-white/10 bg-black">
+        <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-white/10 border-x border-white/10">
+          <div className="lg:col-span-6 p-6 md:p-12 lg:p-24 space-y-16 md:space-y-24">
+            <div className="space-y-6 md:space-y-8">
+              <div className="flex items-center gap-4 text-emerald-500">
                 <Activity className="w-4 h-4" />
-                <span className="text-[10px] font-medium tracking-[0.2em] uppercase">LIVE NETWORK ACTIVITY</span>
+                <span className="text-[10px] font-medium tracking-[0.4em] uppercase">LIVE NETWORK ACTIVITY</span>
               </div>
-              <h2 className="text-5xl font-light tracking-tighter uppercase leading-none">LAUNCH<br /><span className="text-white/20">DISTRIBUTION</span></h2>
+              <h2 className="text-6xl md:text-[100px] font-light tracking-[-0.05em] uppercase leading-[0.85]">LAUNCH<br /><span className="text-white/20">DISTRIBUTION</span></h2>
             </div>
             <PhaseStatus />
           </div>
-          <div className="lg:col-span-6 p-12 bg-white/1">
+          <div className="lg:col-span-6 p-6 md:p-12 lg:p-24 bg-white/1 flex flex-col justify-between space-y-16">
             <MintProgress />
+            <LiveActivityFeed />
           </div>
         </div>
       </section>
 
       {/* Rarity Grid Section */}
-      <section className="border-b border-white/10 overflow-hidden">
+      <section className="border-b border-white/10 overflow-hidden bg-black">
         <div className="max-w-[1600px] mx-auto border-x border-white/10">
-          <div className="p-12 border-b border-white/10 flex flex-col md:flex-row md:items-end justify-between gap-12">
-            <div className="space-y-4">
+          <div className="p-6 md:p-12 lg:p-24 border-b border-white/10 flex flex-col lg:flex-row lg:items-end justify-between gap-12 lg:gap-24">
+            <div className="space-y-6 md:space-y-8">
               <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">ENGINE v1.4.0</p>
-              <h2 className="text-6xl font-light tracking-tighter uppercase leading-none">TRAIT<br /><span className="text-white/20">HIERARCHY</span></h2>
+              <h2 className="text-6xl md:text-[100px] font-light tracking-[-0.05em] uppercase leading-[0.85]">TRAIT<br /><span className="text-white/20">HIERARCHY</span></h2>
             </div>
-            <p className="text-white/40 max-w-sm text-sm font-light leading-relaxed">
-              Every Sui Genesis asset is mathematically generated from 8 distinct trait categories. Explore the probability matrix below.
+            <p className="text-white/40 max-w-sm text-lg md:text-xl font-light leading-relaxed">
+              Every Sui Genesis asset is mathematically generated from 8 distinct trait categories. Explore the probability matrix.
             </p>
           </div>
-          <div className="p-12">
+          <div className="bg-white/1">
             <RarityGrid />
           </div>
         </div>
       </section>
 
       {/* Technology Section */}
-      <section className="border-b border-white/10">
+      <section className="border-b border-white/10 bg-black">
         <div className="max-w-[1600px] mx-auto border-x border-white/10">
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-x divide-white/10">
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/10">
             {[
               { 
                 icon: Shield, 
@@ -169,14 +174,14 @@ export default function Landing() {
                 initial={{ opacity: 0 }}
                 whileInView={{ opacity: 1 }}
                 viewport={{ once: true }}
-                className="p-12 space-y-8 hover:bg-white/2 transition-colors group"
+                className="p-12 md:p-16 lg:p-24 space-y-8 hover:bg-white/2 transition-colors group"
               >
-                <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/40 group-hover:bg-white group-hover:text-black transition-all">
-                  <f.icon className="w-5 h-5" />
+                <div className="w-16 h-16 border border-white/20 flex items-center justify-center text-white/40 group-hover:bg-white group-hover:text-black group-hover:border-white transition-all duration-500">
+                  <f.icon className="w-6 h-6" />
                 </div>
-                <div className="space-y-4">
-                  <h3 className="text-xl font-light tracking-widest uppercase">{f.title}</h3>
-                  <p className="text-white/40 text-sm font-light leading-relaxed">{f.desc}</p>
+                <div className="space-y-6">
+                  <h3 className="text-2xl font-light tracking-widest uppercase text-white">{f.title}</h3>
+                  <p className="text-white/40 text-lg font-light leading-relaxed">{f.desc}</p>
                 </div>
               </motion.div>
             ))}
@@ -185,17 +190,17 @@ export default function Landing() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-40 border-b border-white/10 relative overflow-hidden">
+      <section className="py-24 md:py-40 border-b border-white/10 relative overflow-hidden">
         <div className="max-w-[1600px] mx-auto px-6 relative z-10 text-center space-y-12">
           <div className="space-y-6">
-            <h2 className="text-7xl md:text-[140px] font-thin tracking-[-0.06em] leading-none uppercase">
+            <h2 className="text-5xl sm:text-7xl md:text-[140px] font-thin tracking-[-0.06em] leading-none uppercase">
               JOIN THE<br />
               <span className="text-white/20">NETWORK</span>
             </h2>
           </div>
           
           <div className="flex flex-col sm:flex-row items-center gap-12 justify-center">
-            <Link to="/mint" className="px-20 py-6 rounded-full bg-white text-black font-medium tracking-widest uppercase hover:bg-black hover:text-white border border-white transition-all duration-500">
+            <Link to="/mint" className="px-10 md:px-20 py-5 md:py-6 rounded-full bg-white text-black font-medium tracking-widest uppercase hover:bg-black hover:text-white border border-white transition-all duration-500">
               MINT ACCESS TOKEN
             </Link>
             <div className="flex items-center gap-8">

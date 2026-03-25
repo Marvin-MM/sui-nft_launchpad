@@ -4,7 +4,11 @@ import { useCurrentAccount, useSuiClientQuery, useSuiClient } from '@mysten/dapp
 import { Search, Filter, Repeat, Clock, Coins, X, Info, Loader2, Calendar, ShieldCheck, User } from 'lucide-react';
 import RarityBadge from '../components/RarityBadge';
 import { toast } from 'react-hot-toast';
-import { NFT_TYPE, PACKAGE_ID } from '../lib/sui';
+import { NFT_TYPE, PACKAGE_ID, MIST_PER_SUI } from '../lib/sui';
+import { Transaction } from '@mysten/sui/transactions';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useKiosk } from '../hooks/useKiosk';
+import { resolveKioskArgs, finalizeKiosk } from '../lib/kioskUtils';
 
 export default function RentalMarketplace() {
   const account = useCurrentAccount();
@@ -13,6 +17,8 @@ export default function RentalMarketplace() {
   const [renting, setRenting] = useState(false);
   const [duration, setDuration] = useState(1);
   const suiClient = useSuiClient();
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+  const { kioskId, kioskCapId } = useKiosk();
 
   // Fetch real events to get latest minted NFTs
   const { data: eventData } = useSuiClientQuery(
@@ -64,7 +70,8 @@ export default function RentalMarketplace() {
         name: display?.name || content?.fields?.name || 'Sui Genesis NFT',
         image: display?.image_url || `https://picsum.photos/seed/${obj.data?.objectId}/600/600`,
         rarityScore: rarityScore,
-        pricePerEpoch: 'N/A', // Real rental contract needed for actual prices
+        pricePerEpoch: '2.50', // Mock price for UI demonstration
+        sellerKioskId: '0xSHARED_RENTAL_KIOSK', // Mock resolving lender's kiosk
         maxDuration: 10,
         lender: obj.data?.owner?.AddressOwner || 'Unknown',
         traits: content?.fields?.traits || [],
@@ -80,13 +87,43 @@ export default function RentalMarketplace() {
     if (!account) return;
     setRenting(true);
     try {
-      // Real rent action would go here
-      toast.success('Rental transaction prepared (requires real contract)');
-      setSelectedNft(null);
+      const tx = new Transaction();
+      
+      const { kioskArg, capArg, isNew } = resolveKioskArgs(tx, kioskId, kioskCapId);
+      
+      const priceInMist = BigInt((parseFloat(nft.pricePerEpoch) * duration) * Number(MIST_PER_SUI));
+      const [paymentCoin] = tx.splitCoins(tx.gas, [priceInMist]);
+
+      // Step 8: Call rental logic passing RentCap requirements
+      const [rentCap] = tx.moveCall({
+        target: `${PACKAGE_ID}::rental::rent`,
+        arguments: [
+          tx.object(nft.sellerKioskId),
+          tx.object(nft.id),
+          tx.pure.u64(duration),
+          paymentCoin
+        ]
+      });
+
+      // Transfer the RentCap to the borrower
+      tx.transferObjects([rentCap], tx.pure.address(account.address));
+
+      if (isNew) finalizeKiosk(tx, kioskArg, capArg, account.address);
+
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: () => {
+            toast.success(`Successfully rented asset for ${duration} epochs! RentCap issued.`);
+            setSelectedNft(null);
+          },
+          onError: (e) => toast.error('Rental failed: ' + e.message),
+          onSettled: () => setRenting(false)
+        }
+      );
     } catch (error) {
       console.error(error);
-      toast.error('Rental failed.');
-    } finally {
+      toast.error('Failed to construct rental transaction.');
       setRenting(false);
     }
   };
@@ -98,7 +135,7 @@ export default function RentalMarketplace() {
           <div className="space-y-8">
             <div className="space-y-2">
               <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/40">Sui Genesis Collection</p>
-              <h1 className="text-[80px] md:text-[120px] font-light leading-[0.85] tracking-[-0.04em]">
+              <h1 className="text-6xl sm:text-[80px] md:text-[120px] font-light leading-[0.85] tracking-[-0.04em]">
                 RENTAL<br />
                 <span className="text-white/20">MARKET</span>
               </h1>
@@ -107,7 +144,7 @@ export default function RentalMarketplace() {
               Borrow utility and access by renting Sui Genesis assets from the community.
             </p>
           </div>
-          <div className="flex items-center gap-12 pb-4">
+          <div className="flex items-center gap-6 md:gap-12 pb-4">
             <div className="space-y-1">
               <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/40">Active Rentals</p>
               <p className="text-4xl font-light tracking-tighter">1,240</p>
@@ -133,11 +170,11 @@ export default function RentalMarketplace() {
               className="w-full pl-8 pr-4 py-2 bg-transparent border-b border-white/10 focus:outline-none focus:border-white transition-colors text-sm font-light tracking-widest uppercase"
             />
           </div>
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <button className="px-8 py-3 rounded-full border border-white/20 text-[10px] font-medium tracking-[0.2em] uppercase hover:bg-white hover:text-black transition-all">
+          <div className="flex items-center justify-between gap-4 w-full md:w-auto">
+            <button className="flex-1 md:flex-none px-6 md:px-8 py-3 rounded-full border border-white/20 text-[10px] font-medium tracking-[0.2em] uppercase hover:bg-white hover:text-black transition-all text-center">
               FILTER
             </button>
-            <button className="px-8 py-3 rounded-full border border-white/20 text-[10px] font-medium tracking-[0.2em] uppercase hover:bg-white hover:text-black transition-all">
+            <button className="flex-1 md:flex-none px-6 md:px-8 py-3 rounded-full border border-white/20 text-[10px] font-medium tracking-[0.2em] uppercase hover:bg-white hover:text-black transition-all text-center">
               SORT: YIELD
             </button>
           </div>
@@ -153,7 +190,7 @@ export default function RentalMarketplace() {
               className="group cursor-pointer space-y-6"
               onClick={() => setSelectedNft(nft)}
             >
-              <div className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-white/[0.02]">
+              <div className="relative aspect-3/4 overflow-hidden rounded-2xl bg-white/2">
                 <img 
                   src={nft.image} 
                   alt={nft.name} 
@@ -191,7 +228,7 @@ export default function RentalMarketplace() {
       {/* Rent Modal */}
       <AnimatePresence>
         {selectedNft && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl">
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}

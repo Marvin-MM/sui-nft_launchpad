@@ -49,7 +49,7 @@ export default function PhaseStatus() {
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
-            className={`p-10 space-y-8 relative overflow-hidden transition-colors duration-700 ${
+            className={`p-6 md:p-10 space-y-8 relative overflow-hidden transition-colors duration-700 ${
               isActive ? 'bg-white/3' : 'opacity-30'
             }`}
           >

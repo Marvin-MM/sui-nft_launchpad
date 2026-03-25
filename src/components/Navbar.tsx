@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ConnectModal, useCurrentAccount } from '@mysten/dapp-kit';
+import { ConnectModal, useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, ShoppingBag, BarChart3, Settings, Wallet, Coins, Repeat, Menu, X, Terminal, Activity } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -23,6 +23,7 @@ const navItems = [
 export default function Navbar() {
   const location = useLocation();
   const account = useCurrentAccount();
+  const { mutate: disconnect } = useDisconnectWallet();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -35,11 +36,11 @@ export default function Navbar() {
   return (
     <>
       <nav className={cn(
-        "fixed top-0 left-0 right-0 z-50 h-24 border-b transition-all duration-700",
+        "fixed top-0 left-0 right-0 z-50 h-20 border-b transition-all duration-700",
         scrolled ? "bg-black border-white/10" : "bg-transparent border-white/5"
       )}>
-        <div className="max-w-[1600px] mx-auto px-12 h-full flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-6 group">
+        <div className="max-w-[1600px] mx-auto px-6 md:px-12 h-full flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-4 md:gap-6 group">
             <div className="w-10 h-10 border border-white/20 flex items-center justify-center group-hover:border-white transition-all duration-700">
                <span className="text-sm font-light tracking-tighter">S_G</span>
             </div>
@@ -76,18 +77,30 @@ export default function Navbar() {
                <span className="text-[9px] font-medium tracking-[0.4em] uppercase">MAINNET_SYNC</span>
             </div>
             
-            <ConnectModal
-              trigger={
-                <button className={cn(
-                  "px-8 py-3 text-[10px] font-medium uppercase tracking-[0.4em] transition-all duration-500 border rounded-full",
-                  account 
-                    ? "border-white/10 text-white/40 hover:text-white hover:border-white" 
-                    : "bg-white text-black border-white hover:bg-black hover:text-white"
-                )}>
-                  {account ? account.address.slice(0, 6) + '...' + account.address.slice(-4) : 'connect_wallet'}
-                </button>
-              }
-            />
+            {account ? (
+              <button 
+                onClick={() => disconnect()}
+                title="Disconnect Wallet"
+                className="group px-4 md:px-8 py-2 md:py-3 text-[9px] md:text-[10px] font-medium uppercase tracking-[0.2em] md:tracking-[0.4em] transition-all duration-500 border rounded-full border-white/10 text-white/40 hover:text-red-500 hover:border-red-500 hover:bg-red-500/10 min-w-[100px] sm:min-w-[140px] flex items-center justify-center"
+              >
+                <div className="group-hover:hidden flex items-center lg:gap-2">
+                  <span className="hidden sm:inline">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
+                  <span className="sm:hidden">{account.address.slice(0, 4)}...</span>
+                </div>
+                <div className="hidden group-hover:flex items-center lg:gap-2">
+                  <span>DISCONNECT</span>
+                </div>
+              </button>
+            ) : (
+              <ConnectModal
+                trigger={
+                  <button className="px-4 md:px-8 py-2 md:py-3 text-[9px] md:text-[10px] font-medium uppercase tracking-[0.2em] md:tracking-[0.4em] transition-all duration-500 border rounded-full bg-white text-black border-white hover:bg-black hover:text-white">
+                    <span className="hidden sm:inline">CONNECT_WALLET</span>
+                    <span className="sm:hidden">CONNECT</span>
+                  </button>
+                }
+              />
+            )}
             
             <button 
               className="lg:hidden p-2 text-white/40 hover:text-white"

@@ -17,7 +17,7 @@ export default function RarityGrid() {
           whileInView={{ opacity: 1 }}
           transition={{ delay: i * 0.1 }}
           viewport={{ once: true }}
-          className="p-10 space-y-12 hover:bg-white/1 transition-colors group"
+          className="p-6 lg:p-10 space-y-8 lg:space-y-12 hover:bg-white/1 transition-colors group"
         >
           <div className="space-y-4">
             <h3 className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">{trait.category}</h3>

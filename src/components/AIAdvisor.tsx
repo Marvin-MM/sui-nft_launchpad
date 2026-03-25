@@ -27,8 +27,8 @@ export default function AIAdvisor() {
   };
 
   return (
-    <div className="border border-white/10 bg-white/1 p-10 space-y-10">
-      <div className="flex items-center justify-between">
+    <div className="border border-white/10 bg-white/1 p-6 md:p-10 space-y-8 md:space-y-10">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div className="flex items-center gap-3 text-white">
           <Terminal className="w-4 h-4 text-white/40" />
           <h3 className="text-[10px] font-medium tracking-[0.4em] uppercase">AI MINT ADVISOR v2.4</h3>
