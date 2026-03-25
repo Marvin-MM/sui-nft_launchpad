@@ -6,13 +6,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line, PieChart, Pie, Cell, AreaChart, Area 
 } from 'recharts';
-import { 
-  Activity, Users, Coins, Flame, Lock, ShoppingBag, 
-  TrendingUp, Sparkles, Loader2, Brain, BarChart3, PieChartIcon 
-} from 'lucide-react';
+import { Activity, Brain, Loader2, Sparkles } from 'lucide-react';
 import { aiService } from '../services/aiService';
-
-const COLORS = ['#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
 
 export default function Analytics() {
   const [loadingAI, setLoadingAI] = useState(false);
@@ -86,16 +81,17 @@ export default function Analytics() {
 
   const mintData = useMemo(() => {
     if (!eventData?.data) return [];
+    
     // Group events by day
-    const grouped: Record<string, number> = {};
+    const grouped: Record<string, { epoch: string; minted: number }> = {};
+    
     eventData.data.forEach((e: any) => {
-      const date = new Date(Number(e.timestampMs)).toLocaleDateString();
-      grouped[date] = (grouped[date] || 0) + 1;
+      const date = new Date(Number(e.timestampMs)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (!grouped[date]) grouped[date] = { epoch: date, minted: 0 };
+      grouped[date].minted += 1;
     });
-    return Object.entries(grouped).map(([date, count]) => ({
-      epoch: date,
-      minted: count
-    })).reverse();
+
+    return Object.values(grouped).reverse();
   }, [eventData]);
 
   const traitData = useMemo(() => {
@@ -119,14 +115,28 @@ export default function Analytics() {
   }, [objectsData]);
 
   const stakingData = useMemo(() => {
-    if (!objectsData.length) return [];
-    const staked = objectsData.filter((obj: any) => (obj.data?.content as any)?.fields?.staked).length;
-    const unstaked = objectsData.length - staked;
-    return [
-      { name: 'Staked', value: staked },
-      { name: 'Unstaked', value: unstaked }
-    ];
-  }, [objectsData]);
+    if (!eventData?.data || !objectsData.length) return [];
+    
+    // Calculate cumulative staking by mapping mint times to CURRENT staked objects
+    const grouped: Record<string, { epoch: string; newlyStaked: number }> = {};
+    
+    eventData.data.forEach((e: any) => {
+      const date = new Date(Number(e.timestampMs)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (!grouped[date]) grouped[date] = { epoch: date, newlyStaked: 0 };
+      
+      const objId = e.parsedJson?.object_id;
+      const obj = objectsData.find(o => o.data?.objectId === objId);
+      if (obj && (obj.data?.content as any)?.fields?.staked) {
+         grouped[date].newlyStaked += 1;
+      }
+    });
+
+    let cumulative = 0;
+    return Object.values(grouped).reverse().map(g => {
+       cumulative += g.newlyStaked;
+       return { epoch: g.epoch, staked: cumulative };
+    });
+  }, [eventData, objectsData]);
 
   const getAiSummary = async () => {
     setLoadingAI(true);
@@ -147,33 +157,33 @@ export default function Analytics() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-accent-primary/30">
+    <div className="min-h-screen bg-black text-white selection:bg-white/10">
       <div className="max-w-[1600px] mx-auto border-x border-white/10 min-h-screen">
         {/* Header Section */}
-        <div className="p-6 md:p-12 border-b border-white/10 space-y-8">
-          <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-8">
-            <div className="space-y-4">
-              <p className="text-[10px] font-bold uppercase tracking-[0.4em] opacity-50">Sui Genesis Network</p>
-              <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-none uppercase italic">
+        <div className="p-6 md:p-12 border-b border-white/10 space-y-8 bg-white/1">
+          <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-8 md:gap-12">
+            <div className="space-y-6">
+              <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/20">SUI_GENESIS_NETWORK</p>
+              <h1 className="text-6xl sm:text-[80px] md:text-[120px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
                 ANALYTICS<br />
                 <span className="text-white/20">TERMINAL</span>
               </h1>
             </div>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 md:gap-12 pb-4 w-full md:w-auto">
-              <div className="space-y-1 w-full sm:w-auto">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-50">Network Status</p>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
-                  <p className="text-lg md:text-xl font-mono uppercase tracking-widest">Mainnet-v1.0</p>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 md:gap-12 w-full md:w-auto">
+              <div className="space-y-4 w-full sm:w-auto">
+                <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/20">SYS_STATUS</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                  <p className="text-lg md:text-xl font-light uppercase tracking-widest text-emerald-500">MAINNET_V1.0</p>
                 </div>
               </div>
               <button 
                 onClick={getAiSummary}
                 disabled={loadingAI}
-                className="w-full sm:w-auto px-6 md:px-8 py-3 md:py-4 border border-white/20 text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3"
+                className="w-full sm:w-auto px-8 py-4 border border-white text-[10px] font-medium uppercase tracking-[0.4em] hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3"
               >
-                {loadingAI ? <Loader2 className="w-5 h-5 animate-spin" /> : <Brain className="w-5 h-5" />}
-                {aiSummary ? 'REFRESH AI' : 'GENERATE AI'}
+                {loadingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+                {aiSummary ? 'REFRESH_AI' : 'GENERATE_AI'}
               </button>
             </div>
           </div>
@@ -182,18 +192,18 @@ export default function Analytics() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-white/10 border-b border-white/10">
           {[
-            { label: 'Total Minted', value: stats.minted.toLocaleString(), suffix: '/ 10,000' },
-            { label: 'Total Supply', value: stats.total.toLocaleString(), suffix: 'NFTs' },
-            { label: 'Total Staked', value: stats.staked.toLocaleString(), suffix: 'NFTs' },
-            { label: 'Rental Volume', value: stats.volume, suffix: 'SUI' },
-            { label: 'Royalties', value: (stats.volume * 0.05).toFixed(2), suffix: 'SUI' },
-            { label: 'Holders', value: Math.floor(stats.minted * 0.22).toLocaleString(), suffix: 'Wallets' },
+            { label: 'TOTAL_MINTED', value: stats.minted.toLocaleString(), suffix: '/ 10,000' },
+            { label: 'TOTAL_SUPPLY', value: stats.total.toLocaleString(), suffix: 'NFTS' },
+            { label: 'TOTAL_STAKED', value: stats.staked.toLocaleString(), suffix: 'NFTS' },
+            { label: 'RENTAL_VOLUME', value: stats.volume, suffix: 'SUI' },
+            { label: 'ROYALTY_FEES', value: (stats.volume * 0.05).toFixed(2), suffix: 'SUI' },
+            { label: 'HOLDERS', value: Math.floor(stats.minted * 0.22).toLocaleString(), suffix: 'WALLETS' },
           ].map((stat) => (
-            <div key={stat.label} className="p-6 md:p-8 space-y-4 hover:bg-white/5 transition-colors group">
-              <p className="text-[10px] font-serif italic uppercase tracking-widest opacity-50 group-hover:opacity-70">{stat.label}</p>
-              <div className="space-y-1">
-                <h2 className="text-2xl md:text-3xl font-mono tracking-tighter leading-none">{stat.value}</h2>
-                <p className="text-[10px] font-mono opacity-40 group-hover:opacity-60 uppercase tracking-widest">{stat.suffix}</p>
+            <div key={stat.label} className="p-8 md:p-12 space-y-6 hover:bg-white/1 transition-colors group">
+              <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/20 group-hover:text-white/40">{stat.label}</p>
+              <div className="space-y-2">
+                <h2 className="text-4xl md:text-5xl font-light tracking-tighter leading-none">{stat.value}</h2>
+                <p className="text-[10px] font-medium text-white/40 uppercase tracking-[0.4em]">{stat.suffix}</p>
               </div>
             </div>
           ))}
@@ -207,12 +217,12 @@ export default function Analytics() {
               animate={{ opacity: 1, height: 'auto' }}
               className="border-b border-white/10 bg-white/5 text-white overflow-hidden"
             >
-              <div className="p-12 space-y-4">
-                <div className="flex items-center gap-2 opacity-50">
+              <div className="p-8 md:p-12 space-y-6">
+                <div className="flex items-center gap-3 text-emerald-500">
                   <Sparkles className="w-4 h-4" />
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest">AI COLLECTION ANALYST</h3>
+                  <h3 className="text-[10px] font-medium uppercase tracking-[0.4em]">AI_SYNTHESIS</h3>
                 </div>
-                <p className="text-3xl font-serif italic tracking-tight leading-relaxed">
+                <p className="text-xl md:text-2xl font-light tracking-wide leading-relaxed uppercase">
                   "{aiSummary}"
                 </p>
               </div>
@@ -222,46 +232,44 @@ export default function Analytics() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 divide-x divide-white/10">
           {/* Mint Activity */}
-          <div className="p-12 space-y-8 border-b lg:border-b-0 border-white/10">
+          <div className="p-8 md:p-12 space-y-12 border-b lg:border-b-0 border-white/10">
             <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <h3 className="text-xl font-black italic tracking-tight uppercase">MINT ACTIVITY</h3>
-                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Epoch-based distribution</p>
+              <div className="space-y-2">
+                <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/20">NETWORK_METRIC</p>
+                <h3 className="text-3xl font-light tracking-tighter uppercase">DISTRIBUTION</h3>
               </div>
             </div>
             <div className="h-[350px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={mintData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" opacity={0.1} vertical={false} />
-                  <XAxis dataKey="epoch" stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="epoch" stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} tickMargin={12} />
+                  <YAxis stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} tickMargin={12} />
                   <Tooltip 
-                    contentStyle={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.1)', color: '#ffffff', fontSize: '10px', fontFamily: 'monospace' }}
+                    contentStyle={{ background: '#000000', border: '1px solid rgba(255,255,255,0.2)', color: '#ffffff', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.2em' }}
                     cursor={{ fill: '#ffffff', opacity: 0.05 }}
                   />
-                  <Bar dataKey="allowlist" stackId="a" fill="#ffffff" fillOpacity={0.8} />
-                  <Bar dataKey="public" stackId="a" fill="#ffffff" fillOpacity={0.5} />
-                  <Bar dataKey="dutch" stackId="a" fill="#ffffff" fillOpacity={0.2} />
+                  <Bar dataKey="minted" fill="#ffffff" fillOpacity={1} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           {/* Staking Growth */}
-          <div className="p-12 space-y-8">
+          <div className="p-8 md:p-12 space-y-12">
             <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <h3 className="text-xl font-black italic tracking-tight uppercase">STAKING GROWTH</h3>
-                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Cumulative participation</p>
+              <div className="space-y-2">
+                <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/20">PROTOCOL_ADOPTION</p>
+                <h3 className="text-3xl font-light tracking-tighter uppercase">STAKING_TVL</h3>
               </div>
             </div>
             <div className="h-[350px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={stakingData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" opacity={0.1} vertical={false} />
-                  <XAxis dataKey="epoch" stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.1)', color: '#ffffff', fontSize: '10px', fontFamily: 'monospace' }} />
+                  <XAxis dataKey="epoch" stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} tickMargin={12} />
+                  <YAxis stroke="#ffffff" fontSize={10} axisLine={false} tickLine={false} tickMargin={12} />
+                  <Tooltip contentStyle={{ background: '#000000', border: '1px solid rgba(255,255,255,0.2)', color: '#ffffff', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.2em' }} />
                   <Area type="monotone" dataKey="staked" stroke="#ffffff" fill="#ffffff" fillOpacity={0.1} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -271,25 +279,25 @@ export default function Analytics() {
 
         {/* Trait Distribution - Visible Grid */}
         <div className="border-t border-white/10">
-          <div className="p-12 border-b border-white/10">
-            <h3 className="text-xl font-black italic tracking-tight uppercase">RARE TRAIT DISTRIBUTION</h3>
+          <div className="p-8 md:p-12 border-b border-white/10">
+            <h3 className="text-3xl font-light tracking-tighter uppercase">TRAIT_DISTRIBUTION</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-x divide-y md:divide-y-0 divide-white/10">
             {traitData.map((trait) => (
-              <div key={trait.name} className="p-8 space-y-6 hover:bg-white/5 transition-colors group">
+              <div key={trait.name} className="p-8 space-y-6 hover:bg-white/1 transition-colors group">
                 <div className="flex justify-between items-end">
-                  <p className="text-sm font-bold uppercase tracking-widest">{trait.name}</p>
-                  <p className="text-[10px] font-serif italic opacity-50 group-hover:opacity-100">{trait.rarity}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/60 group-hover:text-white">{trait.name}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-emerald-500">{trait.rarity}</p>
                 </div>
-                <div className="space-y-2">
-                  <div className="h-1 w-full bg-white/10 group-hover:bg-white/20 overflow-hidden">
+                <div className="space-y-4">
+                  <div className="h-[2px] w-full bg-white/10 group-hover:bg-white/20 overflow-hidden">
                     <motion.div 
                       initial={{ width: 0 }}
                       whileInView={{ width: `${trait.value * 5}%` }}
-                      className="h-full bg-white group-hover:bg-accent-primary"
+                      className="h-full bg-white transition-all duration-1000"
                     />
                   </div>
-                  <p className="text-[10px] font-mono opacity-40 group-hover:opacity-60 uppercase tracking-widest">Prevalence: {trait.value}%</p>
+                  <p className="text-[10px] font-medium text-white/40 uppercase tracking-[0.4em]">PREVALENCE: {trait.value}%</p>
                 </div>
               </div>
             ))}

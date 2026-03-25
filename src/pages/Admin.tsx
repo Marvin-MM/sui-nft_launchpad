@@ -16,6 +16,9 @@ export default function Admin() {
   const { mutate: signAndExecute } = useSignAndExecuteTransaction();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('phases');
+  const [feeInputs, setFeeInputs] = useState({ allowlist: '0', public: '0' });
+  const [royaltyInput, setRoyaltyInput] = useState('0');
+
   const [confirmConfig, setConfirmConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -43,22 +46,83 @@ export default function Admin() {
     }
   );
 
+  const currentPhase = mintConfig?.data?.content?.dataType === 'moveObject' 
+    ? (mintConfig.data.content.fields as any).current_phase || 0 
+    : 0;
+
+  // Sync chain data to inputs once loaded
+  useMemo(() => {
+    if (mintConfig?.data?.content?.dataType === 'moveObject') {
+       const f = mintConfig.data.content.fields as any;
+       setFeeInputs({
+         allowlist: (Number(f.allowlist_price_mist) / Number(MIST_PER_SUI)).toString(),
+         public: (Number(f.mint_fee) / Number(MIST_PER_SUI)).toString()
+       });
+       setRoyaltyInput(f.royalty_bps?.toString() || '0');
+    }
+  }, [mintConfig]);
+
   const treasuryBalance = useMemo(() => {
-    const content = mintConfig?.data?.content as any;
-    if (!content) return '0.00';
-    const balanceMist = content.fields?.balance || 0;
+    if (mintConfig?.data?.content?.dataType !== 'moveObject') return '0.00';
+    const balanceMist = (mintConfig.data.content.fields as any).balance || 0;
     return (Number(balanceMist) / Number(MIST_PER_SUI)).toFixed(2);
   }, [mintConfig]);
 
-  const handleAction = async (action: string, params: any) => {
+  const handleAction = async (action: string, params: any = {}) => {
     if (!account) return;
     setLoading(true);
     try {
       const tx = new Transaction();
-      toast.success(`${action} sequence initialized (requires contract integration)`);
-    } catch (error) {
+      const adminCapId = adminCapData?.data?.[0]?.data?.objectId;
+      
+      if (!adminCapId) {
+        throw new Error("Missing AdminCap");
+      }
+
+      if (action === 'Withdraw') {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mint::withdraw_treasury`,
+          arguments: [tx.object(adminCapId), tx.object(MINT_CONFIG_ID)]
+        });
+      } else if (action === 'Update Phase') {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mint::set_phase`,
+          arguments: [tx.object(adminCapId), tx.object(MINT_CONFIG_ID), tx.pure.u8(params.phase)]
+        });
+      } else if (action === 'Update Fees') {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mint::set_allowlist_price`,
+          arguments: [tx.object(adminCapId), tx.object(MINT_CONFIG_ID), tx.pure.u64(Number(feeInputs.allowlist) * Number(MIST_PER_SUI))]
+        });
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mint::set_mint_fee`,
+          arguments: [tx.object(adminCapId), tx.object(MINT_CONFIG_ID), tx.pure.u64(Number(feeInputs.public) * Number(MIST_PER_SUI))]
+        });
+      } else if (action === 'Halt Protocol') {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mint::set_paused`,
+          arguments: [tx.object(adminCapId), tx.object(MINT_CONFIG_ID), tx.pure.bool(true)]
+        });
+      } else {
+        toast.error(`Action ${action} requires specialized capability objects not in config.`);
+        setLoading(false);
+        setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        return;
+      }
+
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: () => {
+            toast.success(`${action} confirmed on-chain.`);
+            setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+          },
+          onError: (e) => toast.error(`Transaction failed: ${e.message}`)
+        }
+      );
+    } catch (error: any) {
       console.error(error);
-      toast.error('Protocol action failed.');
+      toast.error(error.message || 'Protocol action failed.');
     } finally {
       setLoading(false);
     }
@@ -160,11 +224,13 @@ export default function Admin() {
 
               <div className="divide-y border border-white/10 divide-white/10 border-collapse">
                 {[
-                  { id: 0, name: 'Cycle 0: Preparation', desc: 'Protocol initialized. Public minting deactivated.', status: 'Inactive' },
-                  { id: 1, name: 'Cycle 1: Contributors', desc: 'White-signed identifiers only.', status: 'Active' },
-                  { id: 2, name: 'Cycle 2: Distribution', desc: 'Sui Network global access enabled.', status: 'Inactive' },
-                ].map((p) => (
-                  <div key={p.id} className="grid grid-cols-1 md:grid-cols-4 items-center p-8 md:p-12 gap-6 md:gap-0 hover:bg-white/1 transition-all group">
+                  { id: 0, name: 'Cycle 0: Preparation', desc: 'Protocol initialized. Public minting deactivated.' },
+                  { id: 1, name: 'Cycle 1: Contributors', desc: 'White-signed identifiers only.' },
+                  { id: 2, name: 'Cycle 2: Distribution', desc: 'Sui Network global access enabled.' },
+                ].map((p) => {
+                  const isActive = currentPhase === p.id;
+                  return (
+                  <div key={p.id} className={`grid grid-cols-1 md:grid-cols-4 items-center p-8 md:p-12 gap-6 md:gap-0 transition-all group ${isActive ? 'bg-emerald-500/5' : 'hover:bg-white/1'}`}>
                     <div className="md:col-span-2 space-y-4">
                       <div className="space-y-1">
                         <p className="text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">INDEX_0{p.id}</p>
@@ -174,26 +240,30 @@ export default function Admin() {
                     </div>
                     <div className="flex justify-start md:justify-center">
                       <div className={`px-4 py-1 border text-[9px] font-medium tracking-[0.4em] uppercase ${
-                        p.status === 'Active' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/5' : 'border-white/10 text-white/10'
+                        isActive ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/5' : 'border-white/10 text-white/10'
                       }`}>
-                        {p.status}
+                        {isActive ? 'Active' : 'Inactive'}
                       </div>
                     </div>
                     <div className="flex justify-start md:justify-end">
-                      <button 
-                        onClick={() => setConfirmConfig({
-                          isOpen: true,
-                          title: 'MODIFY_PROTOCOL_PHASE',
-                          message: `Are you sure you want to enforce "${p.name}" as the active distribution cycle?`,
-                          onConfirm: () => handleAction('Update Phase', { phase: p.id })
-                        })}
-                        className="px-8 py-3 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all"
-                      >
-                        ACTIVATE
-                      </button>
+                      {!isActive && (
+                        <button 
+                          onClick={() => setConfirmConfig({
+                            isOpen: true,
+                            title: 'MODIFY_PROTOCOL_PHASE',
+                            message: `Are you sure you want to enforce "${p.name}" as the active distribution cycle?`,
+                            onConfirm: () => handleAction('Update Phase', { phase: p.id })
+                          })}
+                          disabled={loading}
+                          className="px-8 py-3 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all disabled:opacity-50"
+                        >
+                          ACTIVATE
+                        </button>
+                      )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </motion.div>
           )}
@@ -249,14 +319,24 @@ export default function Admin() {
                 <div className="p-8 md:p-12 space-y-6 md:space-y-8 group">
                   <label className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">CYCLE_1_VALUATION (SUI)</label>
                   <div className="relative border-b border-white/10 group-focus-within:border-white transition-all">
-                    <input type="number" defaultValue="1.0" className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" />
+                    <input 
+                      type="number" 
+                      value={feeInputs.allowlist}
+                      onChange={(e) => setFeeInputs(p => ({ ...p, allowlist: e.target.value }))}
+                      className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" 
+                    />
                     <span className="absolute right-0 bottom-4 text-white/10 font-light text-xl uppercase tracking-widest">SUI</span>
                   </div>
                 </div>
                 <div className="p-8 md:p-12 space-y-6 md:space-y-8 group">
                   <label className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">CYCLE_2_VALUATION (SUI)</label>
                   <div className="relative border-b border-white/10 group-focus-within:border-white transition-all">
-                    <input type="number" defaultValue="2.0" className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" />
+                    <input 
+                      type="number" 
+                      value={feeInputs.public}
+                      onChange={(e) => setFeeInputs(p => ({ ...p, public: e.target.value }))}
+                      className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" 
+                    />
                     <span className="absolute right-0 bottom-4 text-white/10 font-light text-xl uppercase tracking-widest">SUI</span>
                   </div>
                 </div>
@@ -296,7 +376,12 @@ export default function Admin() {
                 <div className="p-8 md:p-12 space-y-6 md:space-y-8 group">
                   <label className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">BASIS_POINTS (BPS)</label>
                   <div className="relative border-b border-white/10 group-focus-within:border-white transition-all">
-                    <input type="number" defaultValue="500" className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" />
+                    <input 
+                      type="number" 
+                      value={royaltyInput} 
+                      onChange={(e) => setRoyaltyInput(e.target.value)}
+                      className="w-full py-4 bg-transparent focus:outline-none font-light text-5xl md:text-6xl tracking-tighter text-white" 
+                    />
                     <span className="absolute right-0 bottom-4 text-white/10 font-light text-xl uppercase tracking-widest">%</span>
                   </div>
                   <p className="text-[9px] font-light uppercase tracking-widest text-white/40">500 BPS = 5.00% SECONDARY FEE</p>

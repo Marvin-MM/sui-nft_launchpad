@@ -6,7 +6,7 @@ import { Search, Filter, ShoppingBag, Tag, TrendingUp, X, Sparkles, Info, Loader
 import RarityBadge from '../components/RarityBadge';
 import PriceChart from '../components/PriceChart';
 import { toast } from 'react-hot-toast';
-import { formatSui, NFT_TYPE, PACKAGE_ID, MIST_PER_SUI } from '../lib/sui';
+import { formatSui, NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, TRANSFER_POLICY_ID } from '../lib/sui';
 import { aiService, AIPriceEstimate } from '../services/aiService';
 import { useKiosk } from '../hooks/useKiosk';
 import { resolveKioskArgs, finalizeKiosk } from '../lib/kioskUtils';
@@ -24,11 +24,12 @@ export default function Marketplace() {
   // Kiosk resolving
   const { kioskId, kioskCapId } = useKiosk();
 
-  // Fetch real events to get latest minted NFTs
+  // Query NFTMinted events from the events module (nft_app::events, not mint)
+  // The NFTMinted event has field `nft_id` not `object_id`
   const { data: eventData } = useSuiClientQuery(
     'queryEvents',
     {
-      query: { MoveModule: { package: PACKAGE_ID, module: 'mint' } },
+      query: { MoveEventType: `${PACKAGE_ID}::events::NFTMinted` },
       limit: 20,
       order: 'descending',
     }
@@ -40,9 +41,15 @@ export default function Marketplace() {
   useEffect(() => {
     async function fetchObjects() {
       if (!eventData?.data) return;
+      // The NFTMinted event from events.move uses field `nft_id` (address type)
+      const nftInfoMap: Record<string, { feePaid: string }> = {};
       const objectIds = eventData.data
-        .map((e: any) => e.parsedJson?.object_id)
-        .filter(Boolean);
+        .filter((e: any) => e.parsedJson?.nft_id)
+        .map((e: any) => {
+          const nftId = e.parsedJson.nft_id as string;
+          nftInfoMap[nftId] = { feePaid: e.parsedJson?.fee_paid || '0' };
+          return nftId;
+        });
       
       if (objectIds.length === 0) return;
       
@@ -52,9 +59,13 @@ export default function Marketplace() {
           ids: objectIds,
           options: { showContent: true, showDisplay: true, showOwner: true }
         });
-        setObjectsData(res);
+        // Attach on-chain mint fee info to each object
+        setObjectsData(res.map((obj: any) => ({
+          ...obj,
+          _mintFee: nftInfoMap[obj.data?.objectId] || { feePaid: '0' },
+        })));
       } catch (e) {
-        console.error("Failed to fetch objects", e);
+        console.error('Failed to fetch objects', e);
       } finally {
         setLoadingObjects(false);
       }
@@ -68,15 +79,21 @@ export default function Marketplace() {
       const content = obj.data?.content as any;
       const display = obj.data?.display?.data as any;
       const rarityScore = content?.fields?.rarity_score || 0;
+      // Use the actual mint fee from the on-chain event as a floor price indicator
+      const mintFeeSui = formatSui(obj._mintFee?.feePaid || '0');
       
       return {
         id: obj.data?.objectId,
         name: display?.name || content?.fields?.name || 'Sui Genesis NFT',
         image: display?.image_url || `https://picsum.photos/seed/${obj.data?.objectId}/600/600`,
         rarityScore: rarityScore,
-        price: '1.25', // Mock price since testnet contract might not have exact listing dynamically retrieved
-        seller: obj.data?.owner?.AddressOwner || 'Unknown',
-        sellerKioskId: '0xSHARED_KIOSK_ID', // Replaced by resolving seller kiosk ID
+        // Real kiosk listing price would come from Kiosk dynamic fields;
+        // mint fee is the on-chain floor reference. Listings require separate Kiosk indexing.
+        price: mintFeeSui,
+        seller: obj.data?.owner?.ObjectOwner || obj.data?.owner?.AddressOwner || 'In Kiosk',
+        // To get the actual kiosk ID, the indexer must look up which kiosk owns this NFT.
+        // For now we surface the NFT object ID — the buy flow requires seller kiosk resolution.
+        sellerKioskId: null as string | null,
         traits: content?.fields?.traits || [],
         status: 'Listed',
       };
@@ -108,12 +125,13 @@ export default function Marketplace() {
         ]
       });
 
-      // Royalties routing and policy confirmation
+      // pay_with_split royalty rule: royalty::pay_with_split(policy, transfer_request, payment, ctx)
+      // Standard purchase via kiosk then resolve transfer policy royalties
       tx.moveCall({
         target: `0x2::transfer_policy::confirm_request`,
         typeArguments: [NFT_TYPE],
         arguments: [
-          tx.object('TRANSFER_POLICY_ID'),
+          tx.object(TRANSFER_POLICY_ID),
           transferRequest
         ]
       });
@@ -272,138 +290,138 @@ export default function Marketplace() {
       {/* Buy Modal */}
       <AnimatePresence>
         {selectedNft && (
-          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl"
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="glass-card max-w-4xl w-full p-6 md:p-10 space-y-8 relative overflow-y-auto max-h-[90vh]"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-[1000px] w-full grid grid-cols-1 md:grid-cols-2 border border-white/10 bg-black overflow-hidden relative"
             >
               <button 
                 onClick={() => setSelectedNft(null)}
-                className="absolute top-4 right-4 md:top-6 md:right-6 p-2 rounded-full hover:bg-white/5 transition-colors text-white/40 hover:text-white"
+                className="absolute top-6 right-6 p-2 z-10 text-white/40 hover:text-white transition-colors"
+                title="CLOSE_WINDOW"
               >
                 <X className="w-6 h-6" />
               </button>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
-                <div className="space-y-6">
-                  <div className="aspect-square rounded-2xl overflow-hidden glass-card relative">
-                    <img 
-                      src={selectedNft.image} 
-                      alt={selectedNft.name} 
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute top-4 left-4">
-                      <RarityBadge score={selectedNft.rarityScore} />
-                    </div>
-                  </div>
-                  
-                  <div className="glass-card p-6 space-y-4">
-                    <div className="flex items-center gap-2 text-accent-secondary">
-                      <BarChart3 className="w-5 h-5" />
-                      <h4 className="text-xs font-black uppercase tracking-widest">PRICE HISTORY</h4>
-                    </div>
-                    <PriceChart />
-                  </div>
+              <div className="aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
+                <img 
+                  src={selectedNft.image} 
+                  alt={selectedNft.name} 
+                  className="w-full h-full object-cover filter contrast-125 select-none"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute top-6 left-6">
+                  <RarityBadge score={selectedNft.rarityScore} />
                 </div>
-
-                <div className="space-y-8">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-accent-primary">
+              </div>
+              
+              <div className="p-8 md:p-12 lg:p-16 flex flex-col justify-between space-y-12 overflow-y-auto max-h-[85vh] custom-scrollbar">
+                
+                <div className="space-y-10">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4 text-emerald-500">
                       <Tag className="w-5 h-5" />
-                      <p className="text-xs font-black uppercase tracking-widest">Market Listing</p>
+                      <span className="text-[10px] font-medium tracking-[0.4em] uppercase">MARKET_LISTING</span>
                     </div>
-                    <h2 className="text-4xl font-black italic tracking-tighter">{selectedNft.name}</h2>
-                    <p className="text-xs font-mono text-white/40 truncate">{selectedNft.id}</p>
+                    <div className="space-y-2">
+                       <h2 className="text-4xl md:text-5xl font-light tracking-tighter uppercase leading-none">{selectedNft.name}</h2>
+                       <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">ID: {selectedNft.id.slice(0, 16)}...</p>
+                    </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <p className="text-xs font-black uppercase tracking-widest text-white/40">Traits Breakdown</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="border border-white/10 p-4 space-y-1 bg-white/1">
+                      <p className="text-[9px] font-medium tracking-[0.2em] text-white/40 uppercase">ASKING_PRICE</p>
+                      <p className="text-2xl font-light tracking-tighter">{selectedNft.price} SUI</p>
+                    </div>
+                    <div className="border border-white/10 p-4 space-y-1 bg-white/1">
+                      <p className="text-[9px] font-medium tracking-[0.2em] text-white/40 uppercase">SELLER_INDEX</p>
+                      <p className="text-sm font-mono text-white/60 truncate" title={selectedNft.seller}>{selectedNft.seller.slice(0, 10)}..</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 border-t border-white/10 pt-8">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-white/40">TRAIT_ANALYSIS</p>
+                      <span className="text-[9px] text-white/20 uppercase tracking-widest">{selectedNft.traits.length} IDENTIFIED</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       {selectedNft.traits.map((t: any) => (
-                        <div key={t.key} className="p-3 rounded-xl bg-white/5 border border-white/10">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-white/20 mb-1">{t.key}</p>
-                          <p className="text-sm font-bold text-white/80">{t.value}</p>
+                        <div key={t.key} className="p-3 bg-white/5 border border-white/5">
+                          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-white/40 mb-1">{t.key}</p>
+                          <p className="text-sm font-light text-white">{t.value}</p>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-6">
-                    <div className="flex justify-between items-end">
-                      <div className="space-y-1">
-                        <p className="text-xs font-black uppercase tracking-widest text-white/40">Total Price</p>
-                        <p className="text-4xl font-black italic tracking-tighter text-white">
-                          {selectedNft.price} <span className="text-xl text-accent-secondary">SUI</span>
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-black uppercase tracking-widest text-white/40">Royalty (5%)</p>
-                        <p className="text-sm font-bold text-white/60">{(Number(selectedNft.price) * 0.05).toFixed(2)} SUI</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3 p-4 rounded-xl bg-accent-primary/5 border border-accent-primary/20 text-accent-primary text-xs font-medium">
-                        <InfoIcon className="w-4 h-4" />
-                        This transaction includes royalty payment and kiosk locking.
-                      </div>
-                      <button 
-                        onClick={() => handleBuy(selectedNft)}
-                        disabled={buying}
-                        className="w-full py-5 bg-accent-primary text-white font-black italic tracking-widest uppercase rounded-xl hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] transition-all flex items-center justify-center gap-3 text-xl"
-                      >
-                        {buying ? (
-                          <>
-                            <Loader2 className="w-6 h-6 animate-spin" />
-                            PROCESSING...
-                          </>
-                        ) : (
-                          <>
-                            <ShoppingBag className="w-6 h-6" />
-                            CONFIRM PURCHASE
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
                   {/* AI Price Estimate Section */}
-                  <div className="glass-card p-6 border-accent-secondary/20 space-y-4">
+                  <div className="space-y-4 border-t border-white/10 pt-8">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-accent-secondary">
+                      <div className="flex items-center gap-3 text-emerald-500">
                         <Sparkles className="w-4 h-4" />
-                        <h4 className="text-xs font-black uppercase tracking-widest">AI PRICE ESTIMATE</h4>
+                        <span className="text-[10px] font-medium tracking-[0.4em] uppercase">AI_VALUATION</span>
                       </div>
-                      <div className="px-2 py-1 rounded bg-accent-secondary/10 text-[10px] font-black text-accent-secondary">BETA</div>
                     </div>
                     {estimating ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin text-accent-secondary" />
+                      <div className="flex items-center justify-center py-6 border border-white/5 bg-white/1">
+                        <Loader2 className="w-6 h-6 animate-spin text-white/20" />
                       </div>
                     ) : aiEstimate ? (
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                          <p className="text-sm font-medium text-white/40">Estimated Range</p>
-                          <p className="text-lg font-black italic tracking-tight text-white">{aiEstimate.low} - {aiEstimate.high} SUI</p>
+                      <div className="border border-emerald-500/20 p-6 space-y-6 bg-emerald-500/5">
+                        <div className="flex justify-between items-end">
+                          <div className="space-y-1">
+                             <p className="text-[9px] font-medium tracking-[0.2em] text-emerald-500/50 uppercase">ESTIMATED_RANGE</p>
+                             <p className="text-2xl font-light tracking-tighter text-emerald-400">{aiEstimate.low} - {aiEstimate.high} SUI</p>
+                          </div>
+                          <div className="space-y-1 text-right">
+                             <p className="text-[9px] font-medium tracking-[0.2em] text-white/40 uppercase">CONFIDENCE</p>
+                             <p className="text-sm font-medium tracking-widest text-emerald-500">HIGH</p>
+                          </div>
                         </div>
-                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
-                          <div className="h-full w-1/3 bg-accent-secondary ml-[40%] rounded-full shadow-[0_0_10px_rgba(6,182,212,0.5)]" />
-                        </div>
-                        <p className="text-xs text-white/40 leading-relaxed italic">
-                          "{aiEstimate.explanation}"
+                        <div className="h-px bg-emerald-500/20 w-full" />
+                        <p className="text-[10px] text-emerald-400/60 leading-relaxed uppercase tracking-widest">
+                          {aiEstimate.explanation}
                         </p>
                       </div>
-                    ) : (
-                      <p className="text-xs text-white/40 text-center py-4 italic">Select an NFT to see AI valuation.</p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
+
+                <div className="space-y-4 pt-10">
+                  <div className="flex justify-between items-center text-[9px] font-medium uppercase tracking-[0.2em] text-white/40">
+                    <span>Includes protocol royalty transmission</span>
+                    <span>Secure Kiosk Transfer</span>
+                  </div>
+                  <button 
+                    onClick={() => handleBuy(selectedNft)}
+                    disabled={buying}
+                    className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-4"
+                  >
+                    {buying ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        EXECUTING_TRANSFER...
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingBag className="w-5 h-5" />
+                        AUTHORIZE_PURCHASE
+                      </>
+                    )}
+                  </button>
+                </div>
+
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCurrentAccount, useSuiClientQuery, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
-import { networkConfig, NETWORK, NFT_TYPE, PACKAGE_ID } from '../lib/sui';
+import { networkConfig, NETWORK, NFT_TYPE, PACKAGE_ID, UPGRADE_CONFIG_ID, STAKING_POOL_ID, TRANSFER_POLICY_ID } from '../lib/sui';
 import { Wallet, Search, Filter, LayoutGrid, List, Loader2, Coins, Sparkles, X, Info, Zap, Lock, Unlock, Repeat, Flame, Layers, Terminal, Activity, ArrowUpRight } from 'lucide-react';
 import NFTCard from '../components/NFTCard';
 import { toast } from 'react-hot-toast';
@@ -50,19 +50,73 @@ export default function MyCollection() {
     }
   }, [activeModal, selectedNft, suiClient]);
 
-  const { data: ownedObjects, isLoading } = useSuiClientQuery(
-    'getOwnedObjects',
-    {
-      owner: account?.address || '',
-      filter: { StructType: NFT_TYPE },
-      options: { showContent: true, showDisplay: true },
-    },
+  // Queries for the left rail stats
+  const { data: suiBalance } = useSuiClientQuery(
+    'getBalance',
+    { owner: account?.address || '' },
     { enabled: !!account }
   );
 
+  const { data: stakingPool } = useSuiClientQuery(
+    'getObject',
+    { id: STAKING_POOL_ID, options: { showContent: true } },
+    { enabled: !!STAKING_POOL_ID }
+  );
+
+  const [kioskObjects, setKioskObjects] = useState<any[]>([]);
+  const [loadingKiosk, setLoadingKiosk] = useState(false);
+
+  useEffect(() => {
+    async function fetchKioskItems() {
+      if (!kioskId) return;
+      setLoadingKiosk(true);
+      try {
+        let allFields: any[] = [];
+        let hasNextPage = true;
+        let cursor: string | null | undefined = null;
+        
+        // Loop through paginated dynamic fields
+        while (hasNextPage) {
+          const res: any = await suiClient.getDynamicFields({
+            parentId: kioskId,
+            cursor,
+          });
+          allFields = [...allFields, ...res.data];
+          hasNextPage = res.hasNextPage;
+          cursor = res.nextCursor;
+        }
+
+        // Kiosk item keys are 0x2::kiosk::Item where value is { id: string }
+        const itemIds = allFields
+          .filter((f) => f.name.type.includes('kiosk::Item'))
+          .map((f) => f.name.value.id || f.objectId); // Fallback to field objectId if needed, though name.value.id is correct
+
+        if (itemIds.length === 0) {
+          setKioskObjects([]);
+          return;
+        }
+
+        // Fetch the actual objects
+        const objects = await suiClient.multiGetObjects({
+          ids: itemIds,
+          options: { showContent: true, showDisplay: true, showType: true },
+        });
+
+        // Filter only our specific SuiGenesis NFTs (in case the kiosk holds other things)
+        const genesisNfts = objects.filter((o) => o?.data?.type?.includes(NFT_TYPE.split('::')[2]));
+        setKioskObjects(genesisNfts);
+      } catch (err) {
+        console.error('Failed fetching kiosk items:', err);
+      } finally {
+        setLoadingKiosk(false);
+      }
+    }
+    fetchKioskItems();
+  }, [kioskId, suiClient]);
+
   const nfts = useMemo(() => {
-    if (!ownedObjects?.data) return [];
-    return ownedObjects.data.map((obj: any) => {
+    if (!kioskObjects.length) return [];
+    return kioskObjects.map((obj: any) => {
       const content = obj.data?.content as any;
       const display = obj.data?.display?.data as any;
       return {
@@ -79,7 +133,7 @@ export default function MyCollection() {
         kioskCapId: kioskCapId,
       };
     });
-  }, [ownedObjects, kioskId, kioskCapId]);
+  }, [kioskObjects, kioskId, kioskCapId]);
 
   const filteredNfts = nfts.filter(nft => 
     nft.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -98,19 +152,25 @@ export default function MyCollection() {
 
   const executeUpgrade = async () => {
     if (!targetNft || !burnNft || !account) return;
+    if (!UPGRADE_CONFIG_ID) {
+      toast.error('Upgrade system not configured. Set VITE_UPGRADE_CONFIG_ID in .env');
+      setConfirmBurn(false);
+      return;
+    }
     try {
       const tx = new Transaction();
       
-      // Pass 4 distinct Kiosk arguments to support cross-kiosk upgrades
+      // upgrade::upgrade_nft(config, burn_kiosk, burn_cap, burn_nft_id, target_kiosk, target_cap, target_nft_id)
       tx.moveCall({
-        target: `${PACKAGE_ID}::upgrade::burn_to_upgrade`,
+        target: `${PACKAGE_ID}::upgrade::upgrade_nft`,
         arguments: [
-          tx.object(burnNft.kioskId),   // BURN_KIOSK_ID
-          tx.object(burnNft.kioskCapId),// BURN_KIOSK_CAP
-          tx.object(targetNft.kioskId), // TARGET_KIOSK_ID
-          tx.object(targetNft.kioskCapId),// TARGET_KIOSK_CAP
-          tx.object(burnNft.id),        // Burn NFT Object inside the first Kiosk
-          tx.object(targetNft.id),      // Target NFT Object inside the second Kiosk
+          tx.object(UPGRADE_CONFIG_ID),          // &UpgradeConfig
+          tx.object(burnNft.kioskId),            // &mut burn Kiosk
+          tx.object(burnNft.kioskCapId),         // &KioskOwnerCap
+          tx.pure.id(burnNft.id),               // burn_nft_id: ID
+          tx.object(targetNft.kioskId),          // &mut target Kiosk
+          tx.object(targetNft.kioskCapId),       // &KioskOwnerCap
+          tx.pure.id(targetNft.id),             // target_nft_id: ID
         ]
       });
 
@@ -131,14 +191,18 @@ export default function MyCollection() {
     }
   };
 
-  const handleProtocolAction = async () => {
+  const handleProtocolAction = async (actionType: string) => {
     if (!selectedNft || !account) return;
 
-    if (activeModal === 'stake') {
+    if (actionType === 'stake') {
+      if (!STAKING_POOL_ID) {
+        toast.error('Staking pool not configured. Set VITE_STAKING_POOL_ID in .env');
+        return;
+      }
       try {
         const tx = new Transaction();
         
-        // Step 6: Conditionally install extension if missing
+        // If the staking extension is not installed, add it first in the same PTB
         if (!stakingInstalled) {
           tx.moveCall({
             target: `${PACKAGE_ID}::staking::install_extension`,
@@ -149,13 +213,14 @@ export default function MyCollection() {
           });
         }
 
-        // Bundle stake call
+        // staking::stake(pool, kiosk, kiosk_cap, nft_id)
         tx.moveCall({
           target: `${PACKAGE_ID}::staking::stake`,
           arguments: [
-            tx.object(selectedNft.kioskId),
-            tx.object(selectedNft.kioskCapId),
-            tx.object(selectedNft.id)
+            tx.object(STAKING_POOL_ID),            // &mut StakingPool
+            tx.object(selectedNft.kioskId),        // &mut Kiosk
+            tx.object(selectedNft.kioskCapId),     // &KioskOwnerCap
+            tx.pure.id(selectedNft.id),           // nft_id: ID
           ]
         });
 
@@ -172,9 +237,12 @@ export default function MyCollection() {
       } catch (e) {
         toast.error('Failed to construct staking PTB.');
       }
+    } else if (actionType === 'unstake') {
+      // NOTE: Unstaking in the current contract (staking::unstake) requires &mut RewardMintCap.
+      // If RewardMintCap is not a shared object, normal users cannot execute this PTB.
+      toast.error('Unstaking currently disabled. Contract requires Admin RewardMintCap.');
     } else {
-      // Other protocols...
-      toast.success('Protocol action submitted.');
+      toast.success(`${actionType} action submitted.`);
       setActiveModal(null);
     }
   };
@@ -214,14 +282,16 @@ export default function MyCollection() {
           <div className="space-y-12">
             <div className="flex items-center gap-2 text-white/20">
                <Activity className="w-3 h-3" />
-               <p className="text-[10px] font-medium tracking-[0.4em] uppercase">VALUATION_ENGINE</p>
+               <p className="text-[10px] font-medium tracking-[0.4em] uppercase">SYSTEM_BALANCE</p>
             </div>
             <div className="space-y-2">
-              <h2 className="text-5xl lg:text-8xl font-light tracking-tighter text-white">0.00</h2>
-              <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">ACCUMULATED SUI</p>
+              <h2 className="text-5xl lg:text-7xl font-light tracking-tighter text-white">
+                {suiBalance ? (Number(suiBalance.totalBalance) / 1_000_000_000).toFixed(2) : '0.00'}
+              </h2>
+              <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">NATIVE SUI</p>
             </div>
             <button className="w-full py-6 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all">
-              EXECUTE_CLAIM
+              REFRESH_STATE
             </button>
           </div>
 
@@ -231,12 +301,16 @@ export default function MyCollection() {
                <p className="text-[10px] font-medium tracking-[0.4em] uppercase">REWARD_STAKING</p>
             </div>
             <div className="space-y-2">
-              <h2 className="text-5xl lg:text-8xl font-light tracking-tighter text-white">0.0</h2>
+              <h2 className="text-5xl lg:text-7xl font-light tracking-tighter text-white">
+                {stakingPool?.data?.content?.dataType === 'moveObject' 
+                  ? ((stakingPool.data.content.fields as any).reward_rate_per_epoch || '0')
+                  : '0'}
+              </h2>
               <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">REWARD / EPOCH</p>
             </div>
           </div>
 
-          <div className="pt-12 md:pt-24">
+          <div className="pt-12 md:pt-24 hidden lg:block">
             <div className="aspect-square border border-white/10 flex items-center justify-center p-12 text-center group cursor-pointer hover:bg-white transition-all bg-white/1">
               <p className="text-[10px] font-medium tracking-[0.4em] leading-relaxed uppercase group-hover:text-black">
                 Scale protocol engagement to increase distribution weight
@@ -247,10 +321,10 @@ export default function MyCollection() {
 
         {/* Main Content - Collection */}
         <div className="lg:col-span-9 p-6 md:p-12 lg:p-24 space-y-16 md:space-y-24">
-          <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-8 md:gap-12 border-b border-white/10 pb-8 md:pb-12">
+          <div className="flex flex-col items-start justify-between gap-8 md:gap-12 border-b border-white/10 pb-8 md:pb-12">
             <div className="space-y-6">
               <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">STORAGE_INDEX_03</p>
-              <h1 className="text-6xl sm:text-[80px] md:text-[140px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
+              <h1 className="text-6xl sm:text-[80px] md:text-[120px] font-light leading-[0.8] tracking-[-0.05em] uppercase">
                 ASSET<br /><span className="text-white/20">INVENTORY</span>
               </h1>
             </div>
@@ -312,14 +386,24 @@ export default function MyCollection() {
             )}
           </AnimatePresence>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 divide-x divide-y border border-white/10 divide-white/10 border-collapse">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 divide-y sm:divide-y-0 sm:gap-[1px] bg-white/10 border border-white/10">
+            {filteredNfts.length === 0 && !loadingKiosk && (
+              <div className="col-span-1 sm:col-span-2 xl:col-span-3 p-12 text-center text-white/40 font-light tracking-widest uppercase bg-black">
+                NO_ASSETS_FOUND_IN_VAULT
+              </div>
+            )}
+            {loadingKiosk && (
+              <div className="col-span-1 sm:col-span-2 xl:col-span-3 p-12 flex justify-center bg-black">
+                 <Loader2 className="w-8 h-8 animate-spin text-white/20" />
+              </div>
+            )}
             {filteredNfts.map((nft) => (
               <div 
                 key={nft.id} 
-                className={`p-6 md:p-12 space-y-8 md:space-y-12 group transition-all cursor-pointer ${
-                  targetNft?.id === nft.id ? 'bg-emerald-500/10 border-emerald-500/50' : 
-                  burnNft?.id === nft.id ? 'bg-orange-500/10 border-orange-500/50' : 
-                  'hover:bg-white/1'
+                className={`p-6 md:p-8 lg:p-12 space-y-8 md:space-y-12 group transition-all cursor-pointer bg-black ${
+                  targetNft?.id === nft.id ? 'bg-emerald-500/10 !ring-2 !ring-emerald-500 !ring-inset z-10' : 
+                  burnNft?.id === nft.id ? 'bg-orange-500/10 !ring-2 !ring-orange-500 !ring-inset z-10' : 
+                  'hover:bg-white/5'
                 }`} 
                 onClick={() => handleAction(nft, 'view')}
               >
@@ -356,27 +440,27 @@ export default function MyCollection() {
         {activeModal && selectedNft && (
           <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl">
             <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
+              initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="max-w-[1200px] w-full grid grid-cols-1 lg:grid-cols-2 border border-white/10 bg-black overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-[1200px] w-full grid grid-cols-1 lg:grid-cols-2 border border-white/10 bg-black relative max-h-[90vh] overflow-y-auto custom-scrollbar shadow-2xl"
             >
-              <div className="aspect-square border-b lg:border-b-0 lg:border-r border-white/10 p-6 md:p-12 bg-white/1 relative">
+              <div className="aspect-square lg:border-r border-white/10 bg-white/1 relative flex items-center justify-center p-6 sm:p-12">
                 <img 
                   src={selectedNft.image} 
                   alt={selectedNft.name} 
-                  className="w-full h-full object-cover filter contrast-110"
+                  className="w-full h-full object-cover filter contrast-125 select-none"
                   referrerPolicy="no-referrer"
                 />
                 <button 
                   onClick={() => setActiveModal(null)}
-                  className="absolute top-12 left-12 p-3 border border-white/20 hover:border-white transition-all text-white/40 hover:text-white bg-black/50"
+                  className="absolute top-6 right-6 lg:left-6 lg:right-auto p-2 bg-black/60 border border-white/20 hover:border-white transition-all text-white/40 hover:text-white backdrop-blur-sm z-10"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="p-8 md:p-12 lg:p-24 flex flex-col justify-between space-y-12">
+              <div className="p-8 md:p-12 lg:p-16 xl:p-24 flex flex-col justify-between space-y-12">
                  <div className="space-y-8 md:space-y-12">
                     <div className="flex items-center gap-4 text-white/40">
                        <Sparkles className="w-4 h-4" />
@@ -421,14 +505,23 @@ export default function MyCollection() {
                     </div>
                  </div>
 
-                 <div className="space-y-4">
-                    <button 
-                      onClick={handleProtocolAction}
-                      disabled={activeModal === 'stake' && checkingExtension}
-                      className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-50"
-                    >
-                      EXECUTE_FINAL_FINALIZATION
-                    </button>
+                 <div className="space-y-4 pt-8 border-t border-white/10">
+                    {!selectedNft.staked ? (
+                      <button 
+                        onClick={() => handleProtocolAction('stake')}
+                        disabled={checkingExtension}
+                        className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-50"
+                      >
+                        {checkingExtension ? 'VALIDATING_KIOSK...' : 'STAKE_ASSET_IN_VAULT'}
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handleProtocolAction('unstake')}
+                        className="w-full py-6 bg-transparent text-white font-medium tracking-[0.4em] uppercase hover:bg-white/5 border border-white/20 hover:border-white transition-all duration-500"
+                      >
+                        UNSTAKE_AND_CLAIM
+                      </button>
+                    )}
                  </div>
               </div>
             </motion.div>
