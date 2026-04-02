@@ -5,6 +5,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { Search, Filter, ShoppingBag, Tag, TrendingUp, X, Sparkles, Info, Loader2, InfoIcon, BarChart3 } from 'lucide-react';
 import RarityBadge from '../components/RarityBadge';
 import PriceChart from '../components/PriceChart';
+import WalrusImage from '../components/WalrusImage';
 import { toast } from 'react-hot-toast';
 import { formatSui, NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, TRANSFER_POLICY_ID } from '../lib/sui';
 import { aiService, AIPriceEstimate } from '../services/aiService';
@@ -41,7 +42,7 @@ export default function Marketplace() {
   useEffect(() => {
     async function fetchObjects() {
       if (!eventData?.data) return;
-      // The NFTMinted event from events.move uses field `nft_id` (address type)
+
       const nftInfoMap: Record<string, { feePaid: string }> = {};
       const objectIds = eventData.data
         .filter((e: any) => e.parsedJson?.nft_id)
@@ -50,22 +51,81 @@ export default function Marketplace() {
           nftInfoMap[nftId] = { feePaid: e.parsedJson?.fee_paid || '0' };
           return nftId;
         });
-      
+
       if (objectIds.length === 0) return;
-      
+
       setLoadingObjects(true);
       try {
+        // ── Step 1: fetch NFT objects ─────────────────────────────────────
         const res = await suiClient.multiGetObjects({
           ids: objectIds,
-          options: { showContent: true, showDisplay: true, showOwner: true }
+          options: { showContent: true, showDisplay: true, showOwner: true },
         });
-        // Attach on-chain mint fee info to each object
-        setObjectsData(res.map((obj: any) => ({
-          ...obj,
-          _mintFee: nftInfoMap[obj.data?.objectId] || { feePaid: '0' },
-        })));
+
+        // ── Step 2: for each NFT in a kiosk, check for an active Listing ─
+        // A kiosk::Listing dynamic field exists only when the owner called kiosk::list.
+        // Field name type: 0x2::kiosk::Listing, name.value = { id: nft_id, is_exclusive: false }
+        // Field value: u64 (the listing price in MIST)
+        const enriched = await Promise.all(
+          res.map(async (obj: any) => {
+            const kioskId: string | null = obj.data?.owner?.ObjectOwner ?? null;
+            let isListed = false;
+            let listingPriceMist: string | null = null;
+            let sellerKioskInitialVersion: string | null = null;
+
+            if (kioskId) {
+              try {
+                // Fetch the kiosk object to get its initialSharedVersion
+                const kioskObject = await suiClient.getObject({
+                  id: kioskId,
+                  options: { showOwner: true },
+                });
+                const owner = (kioskObject.data?.owner as any);
+                sellerKioskInitialVersion =
+                  owner?.Shared?.initial_shared_version?.toString() ?? null;
+
+                // Scan dynamic fields for kiosk::Listing entries
+                const fields = await suiClient.getDynamicFields({ parentId: kioskId });
+                const listingField = fields.data.find(
+                  (f: any) =>
+                    f?.name?.type?.includes('kiosk::Listing') &&
+                    (f?.name?.value?.id === obj.data?.objectId ||
+                      String(f?.name?.value?.id).toLowerCase() ===
+                        obj.data?.objectId?.toLowerCase())
+                );
+                if (listingField) {
+                  isListed = true;
+                  // Fetch the actual field object to get the price value
+                  try {
+                    const fieldObj = await suiClient.getDynamicFieldObject({
+                      parentId: kioskId,
+                      name: listingField.name,
+                    });
+                    listingPriceMist =
+                      (fieldObj.data?.content as any)?.fields?.value?.toString() ?? null;
+                  } catch {
+                    // Price not critical — listing still valid
+                  }
+                }
+              } catch (e) {
+                console.warn('[Marketplace] Failed to check kiosk listing for', obj.data?.objectId, e);
+              }
+            }
+
+            return {
+              ...obj,
+              _mintFee: nftInfoMap[obj.data?.objectId] || { feePaid: '0' },
+              _kioskId: kioskId,
+              _isListed: isListed,
+              _listingPriceMist: listingPriceMist,
+              _sellerKioskInitialVersion: sellerKioskInitialVersion,
+            };
+          })
+        );
+
+        setObjectsData(enriched);
       } catch (e) {
-        console.error('Failed to fetch objects', e);
+        console.error('Failed to fetch marketplace objects', e);
       } finally {
         setLoadingObjects(false);
       }
@@ -79,67 +139,144 @@ export default function Marketplace() {
       const content = obj.data?.content as any;
       const display = obj.data?.display?.data as any;
       const rarityScore = content?.fields?.rarity_score || 0;
-      // Use the actual mint fee from the on-chain event as a floor price indicator
       const mintFeeSui = formatSui(obj._mintFee?.feePaid || '0');
-      
+
+      // Use the on-chain listing price if available, else fall back to mint fee
+      const price = obj._listingPriceMist
+        ? formatSui(obj._listingPriceMist)
+        : mintFeeSui;
+
       return {
-        id: obj.data?.objectId,
-        name: display?.name || content?.fields?.name || 'Sui Genesis NFT',
-        image: display?.image_url || `https://picsum.photos/seed/${obj.data?.objectId}/600/600`,
-        rarityScore: rarityScore,
-        // Real kiosk listing price would come from Kiosk dynamic fields;
-        // mint fee is the on-chain floor reference. Listings require separate Kiosk indexing.
-        price: mintFeeSui,
-        seller: obj.data?.owner?.ObjectOwner || obj.data?.owner?.AddressOwner || 'In Kiosk',
-        // To get the actual kiosk ID, the indexer must look up which kiosk owns this NFT.
-        // For now we surface the NFT object ID — the buy flow requires seller kiosk resolution.
-        sellerKioskId: null as string | null,
-        traits: content?.fields?.traits || [],
-        status: 'Listed',
+        id:                          obj.data?.objectId,
+        name:                        display?.name || content?.fields?.name || 'Sui Genesis NFT',
+        description:                 display?.description || content?.fields?.description || '',
+        image:                       display?.image_url || content?.fields?.image_url || null,
+        rarityScore,
+        price,
+        priceMist:                   obj._listingPriceMist || obj._mintFee?.feePaid || '0',
+        seller:                      obj._kioskId || obj.data?.owner?.AddressOwner || 'Unknown',
+        sellerKioskId:               obj._kioskId as string | null,
+        sellerKioskInitialVersion:   obj._sellerKioskInitialVersion as string | null,
+        isListed:                    obj._isListed as boolean,
+        traits:                      content?.fields?.traits || [],
+        status:                      obj._isListed ? 'LISTED' : 'IN_KIOSK',
       };
     });
   }, [objectsData]);
 
-  const filteredListings = listings.filter(nft => 
+  const filteredListings = listings.filter(nft =>
     nft.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const handleBuy = async (nft: any) => {
     if (!account) return;
+
+    // ── Guard 1: NFT must be actively listed via kiosk::list ─────────────────
+    if (!nft.isListed) {
+      toast.error(
+        'This NFT is not listed for sale. ' +
+        'The owner must list it from their My Collection page first.',
+        { duration: 7000, icon: '🔒' }
+      );
+      return;
+    }
+
+    // ── Guard 2: We need the seller kiosk ID and its shared version ──────────
+    if (!nft.sellerKioskId) {
+      toast.error('Cannot resolve seller kiosk. Please refresh and try again.');
+      return;
+    }
+
+    if (!TRANSFER_POLICY_ID) {
+      toast.error('TransferPolicy not configured. Set VITE_TRANSFER_POLICY_ID in .env');
+      return;
+    }
+
+    // ── Guard 3: Buyer cannot buy their own NFT ───────────────────────────────
+    if (nft.seller === account.address) {
+      toast.error('You cannot purchase your own NFT.');
+      return;
+    }
+
     setBuying(true);
     try {
       const tx = new Transaction();
-      
+
+      // ── Resolve buyer's kiosk ─────────────────────────────────────────────
       const { kioskArg, capArg, isNew } = resolveKioskArgs(tx, kioskId, kioskCapId);
-      
-      const priceInMist = BigInt(parseFloat(nft.price) * Number(MIST_PER_SUI));
+
+      // ── Use the on-chain listing price (exact, in MIST) ───────────────────
+      const priceInMist = BigInt(nft.priceMist || '0');
+
+      // ── 1. Split payment coin ─────────────────────────────────────────────
       const [paymentCoin] = tx.splitCoins(tx.gas, [priceInMist]);
 
+      // ── 2. Reference the seller's kiosk as a SHARED object ───────────────
+      // Using sharedObjectRef with explicit initialSharedVersion prevents the
+      // "Objects owned by other objects" validation error. The SDK's plain
+      // tx.object() sometimes fails to classify the kiosk as shared when it
+      // encounters child NFTs during PTB object resolution.
+      let sellerKioskArg;
+      if (nft.sellerKioskInitialVersion) {
+        sellerKioskArg = tx.sharedObjectRef({
+          objectId: nft.sellerKioskId,
+          initialSharedVersion: nft.sellerKioskInitialVersion,
+          mutable: true,
+        });
+      } else {
+        sellerKioskArg = tx.object(nft.sellerKioskId);
+      }
+
+      // ── 3. Execute kiosk::purchase ────────────────────────────────────────
+      // kiosk::purchase extracts the NFT from the seller's kiosk and
+      // returns: (NFT object, TransferRequest hot-potato)
       const [purchasedItem, transferRequest] = tx.moveCall({
         target: '0x2::kiosk::purchase',
         typeArguments: [NFT_TYPE],
         arguments: [
-          tx.object(nft.sellerKioskId),
-          tx.object(nft.id),
-          paymentCoin
-        ]
+          sellerKioskArg,
+          tx.pure.id(nft.id),
+          paymentCoin,
+        ],
       });
 
-      // pay_with_split royalty rule: royalty::pay_with_split(policy, transfer_request, payment, ctx)
-      // Standard purchase via kiosk then resolve transfer policy royalties
+      // ── 4. Pay royalty — satisfies the royalty::Rule in the TransferPolicy
+      // royalty::pay takes (&mut TransferPolicy, &mut TransferRequest, Coin<SUI>, ctx)
+      // Overpay slightly (5% + buffer); contract returns change to sender.
+      // The &mut TransferRequest borrow means transferRequest is still usable after.
+      const royaltyBuffer = BigInt(Math.ceil(Number(priceInMist) * 0.06)); // 6% covers up to 5% BPS + min
+      const [royaltyCoin] = tx.splitCoins(tx.gas, [royaltyBuffer]);
       tx.moveCall({
-        target: `0x2::transfer_policy::confirm_request`,
+        target: `${PACKAGE_ID}::royalty::pay`,
+        arguments: [
+          tx.object(TRANSFER_POLICY_ID),
+          transferRequest,
+          royaltyCoin,
+        ],
+      });
+
+      // ── 5. Confirm the transfer request (all rules satisfied) ─────────────
+      // confirm_request consumes (destroys) the hot potato TransferRequest.
+      tx.moveCall({
+        target: '0x2::transfer_policy::confirm_request',
         typeArguments: [NFT_TYPE],
         arguments: [
           tx.object(TRANSFER_POLICY_ID),
-          transferRequest
-        ]
+          transferRequest,
+        ],
       });
 
+      // ── 6. Lock NFT into buyer's kiosk ────────────────────────────────────
+      // Must use kiosk::lock (not place) to re-enforce the TransferPolicy.
       tx.moveCall({
-        target: '0x2::kiosk::place',
+        target: '0x2::kiosk::lock',
         typeArguments: [NFT_TYPE],
-        arguments: [kioskArg, capArg, purchasedItem]
+        arguments: [
+          kioskArg,
+          capArg,
+          tx.object(TRANSFER_POLICY_ID),
+          purchasedItem,
+        ],
       });
 
       if (isNew) finalizeKiosk(tx, kioskArg, capArg, account.address);
@@ -148,16 +285,30 @@ export default function Marketplace() {
         { transaction: tx },
         {
           onSuccess: () => {
-            toast.success('Purchase successful! Royalty automatically distributed to split config.');
+            toast.success('Purchase complete! NFT locked in your Kiosk with royalty paid. 🎉');
             setSelectedNft(null);
           },
-          onError: () => toast.error('Standard royalty purchase failed.'),
+          onError: (err: any) => {
+            const msg = err?.message || '';
+            if (msg.includes('EItemNotListed') || msg.includes('abort code: 5') || msg.includes('abort code: 9')) {
+              toast.error(
+                'Purchase failed: NFT is no longer listed. The seller may have delisted it.',
+                { duration: 8000 }
+              );
+            } else if (msg.includes('EInsufficientRoyalty') || msg.includes('abort code: 0')) {
+              toast.error('Royalty payment insufficient. Please try again.');
+            } else if (msg.includes('EIncorrectAmount') || msg.includes('abort code: 3')) {
+              toast.error('Payment amount incorrect. Price may have changed — please refresh.');
+            } else {
+              toast.error('Purchase failed: ' + (msg || 'Unknown error'));
+            }
+          },
           onSettled: () => setBuying(false),
         }
       );
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to construct Kiosk purchase transaction.');
+    } catch (error: any) {
+      console.error('Buy PTB construction error:', error);
+      toast.error('Failed to construct purchase transaction: ' + (error?.message || 'Unknown error'));
       setBuying(false);
     }
   };
@@ -256,11 +407,10 @@ export default function Marketplace() {
               onClick={() => setSelectedNft(nft)}
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-2xl bg-white/2">
-                <img 
+                <WalrusImage 
                   src={nft.image} 
                   alt={nft.name} 
                   className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
-                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-6 left-6">
                   <RarityBadge score={nft.rarityScore} />
@@ -278,8 +428,22 @@ export default function Marketplace() {
                     <h3 className="text-lg font-light tracking-tight">{nft.name}</h3>
                     <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/40">GENESIS COLLECTION</p>
                   </div>
-                  <p className="text-lg font-light tracking-tighter">{nft.price} SUI</p>
+                  <div className="text-right space-y-1">
+                    {nft.isListed ? (
+                      <>
+                        <p className="text-lg font-light tracking-tighter">{nft.price} SUI</p>
+                        <span className="text-[8px] font-medium tracking-[0.2em] uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5">LISTED</span>
+                      </>
+                    ) : (
+                      <span className="text-[8px] font-medium tracking-[0.2em] uppercase text-white/30 bg-white/5 px-2 py-0.5">IN KIOSK</span>
+                    )}
+                  </div>
                 </div>
+                {typeof nft.description === 'string' && nft.description.trim() && (
+                  <p className="text-xs font-light text-white/40 line-clamp-2 leading-relaxed">
+                    {nft.description}
+                  </p>
+                )}
                 <div className="h-px bg-white/5" />
               </div>
             </motion.div>
@@ -294,7 +458,7 @@ export default function Marketplace() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl"
+            className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -311,11 +475,10 @@ export default function Marketplace() {
               </button>
 
               <div className="aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
-                <img 
+                <WalrusImage 
                   src={selectedNft.image} 
                   alt={selectedNft.name} 
                   className="w-full h-full object-cover filter contrast-125 select-none"
-                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-6 left-6">
                   <RarityBadge score={selectedNft.rarityScore} />
@@ -326,14 +489,23 @@ export default function Marketplace() {
                 
                 <div className="space-y-10">
                   <div className="space-y-4">
-                    <div className="flex items-center gap-4 text-emerald-500">
+                    <div className={`flex items-center gap-4 ${selectedNft.isListed ? 'text-emerald-500' : 'text-amber-500'}`}>
                       <Tag className="w-5 h-5" />
-                      <span className="text-[10px] font-medium tracking-[0.4em] uppercase">MARKET_LISTING</span>
+                      <span className="text-[10px] font-medium tracking-[0.4em] uppercase">
+                        {selectedNft.isListed ? 'MARKET_LISTING' : 'VAULTED / NOT_FOR_SALE'}
+                      </span>
                     </div>
                     <div className="space-y-2">
                        <h2 className="text-4xl md:text-5xl font-light tracking-tighter uppercase leading-none">{selectedNft.name}</h2>
                        <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">ID: {selectedNft.id.slice(0, 16)}...</p>
                     </div>
+                    {typeof selectedNft.description === 'string' && selectedNft.description.trim() && (
+                      <div className="pt-2">
+                         <p className="text-sm md:text-base font-light text-white/40 leading-relaxed border-l-2 border-white/20 pl-4 py-1">
+                           {selectedNft.description}
+                         </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -400,20 +572,35 @@ export default function Marketplace() {
                     <span>Includes protocol royalty transmission</span>
                     <span>Secure Kiosk Transfer</span>
                   </div>
-                  <button 
+                  {!selectedNft.isListed && (
+                    <div className="border border-amber-500/20 bg-amber-500/5 p-4 text-center">
+                      <p className="text-[10px] font-medium tracking-[0.3em] text-amber-400 uppercase">
+                        🔒 NOT LISTED — Owner must list this NFT for sale from their My Collection
+                      </p>
+                    </div>
+                  )}
+                  <button
                     onClick={() => handleBuy(selectedNft)}
-                    disabled={buying}
-                    className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-4"
+                    disabled={buying || !selectedNft.isListed}
+                    className={`w-full py-6 font-medium tracking-[0.4em] uppercase border transition-all duration-500 flex items-center justify-center gap-4 ${
+                      selectedNft.isListed
+                        ? 'bg-white text-black hover:bg-black hover:text-white border-white disabled:opacity-30 disabled:cursor-not-allowed'
+                        : 'bg-transparent text-white/20 border-white/10 cursor-not-allowed'
+                    }`}
                   >
                     {buying ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
                         EXECUTING_TRANSFER...
                       </>
-                    ) : (
+                    ) : selectedNft.isListed ? (
                       <>
                         <ShoppingBag className="w-5 h-5" />
                         AUTHORIZE_PURCHASE
+                      </>
+                    ) : (
+                      <>
+                        🔒 NOT LISTED FOR SALE
                       </>
                     )}
                   </button>

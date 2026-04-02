@@ -4,6 +4,7 @@ import { useCurrentAccount, useSuiClientQuery, useSuiClient } from '@mysten/dapp
 import { Search, Filter, Repeat, Clock, Coins, X, Info, Loader2, Calendar, ShieldCheck, User } from 'lucide-react';
 import RarityBadge from '../components/RarityBadge';
 import { toast } from 'react-hot-toast';
+import WalrusImage from '../components/WalrusImage';
 import { NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, RENTAL_POLICY_ID } from '../lib/sui';
 import { Transaction } from '@mysten/sui/transactions';
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
@@ -210,11 +211,10 @@ export default function RentalMarketplace() {
               onClick={() => setSelectedNft(nft)}
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-2xl bg-white/2">
-                <img 
+                <WalrusImage 
                   src={nft.image} 
                   alt={nft.name} 
                   className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
-                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-6 left-6">
                   <RarityBadge score={nft.rarityScore} />
@@ -237,6 +237,11 @@ export default function RentalMarketplace() {
                     <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/40">PER EPOCH</p>
                   </div>
                 </div>
+                {typeof nft.description === 'string' && nft.description.trim() && (
+                  <p className="text-xs font-light text-white/40 line-clamp-2 leading-relaxed">
+                    {nft.description}
+                  </p>
+                )}
                 <div className="h-px bg-white/5" />
               </div>
             </motion.div>
@@ -247,7 +252,7 @@ export default function RentalMarketplace() {
       {/* Rent Modal */}
       <AnimatePresence>
         {selectedNft && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -263,11 +268,10 @@ export default function RentalMarketplace() {
               </button>
 
               <div className="aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
-                <img 
+                <WalrusImage 
                   src={selectedNft.image} 
                   alt={selectedNft.name} 
                   className="w-full h-full object-cover filter contrast-125 select-none"
-                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-6 left-6">
                   <RarityBadge score={selectedNft.rarityScore} />
@@ -285,6 +289,13 @@ export default function RentalMarketplace() {
                        <h2 className="text-4xl md:text-5xl font-light tracking-tighter uppercase leading-none">{selectedNft.name}</h2>
                        <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">ID: {selectedNft.id.slice(0, 16)}...</p>
                     </div>
+                    {typeof selectedNft.description === 'string' && selectedNft.description.trim() && (
+                      <div className="pt-2">
+                         <p className="text-sm md:text-base font-light text-white/40 leading-relaxed border-l-2 border-white/20 pl-4 py-1">
+                           {selectedNft.description}
+                         </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-4 border-t border-white/10 pt-8">

@@ -31,9 +31,13 @@ const DEFAULT_EPOCHS = 5;
 export interface WalrusUploadResult {
   /** The Walrus blob ID (ASCII string) */
   blobId: string;
-  /** The epoch number until which the blob is guaranteed available */
+  /** The Walrus epoch number until which the blob is guaranteed (Walrus epoch scale — display only) */
   guaranteedUntil: number;
-  /** Full gateway URL: https://aggregator.../v1/<blob_id> */
+  /** Number of Walrus storage epochs requested (used to compute Sui epoch_until for on-chain call) */
+  storageEpochs: number;
+  /** MIME type of the uploaded file (e.g. 'image/png'). Used by WalrusImage to set correct Content-Type. */
+  mimeType: string;
+  /** Full gateway URL: https://aggregator.../v1/blobs/<blob_id> */
   gatewayUrl: string;
   /** The walrus:// URI to store on-chain */
   walrusUri: string;
@@ -51,6 +55,8 @@ export async function uploadToWalrus(
   file: File,
   epochs: number = DEFAULT_EPOCHS
 ): Promise<WalrusUploadResult> {
+  // Capture MIME type before the upload for use in display later
+  const mimeType = file.type || 'application/octet-stream';
   const url = `${PUBLISHER_URL}/v1/blobs?epochs=${epochs}`;
 
   let response: Response;
@@ -107,7 +113,7 @@ export async function uploadToWalrus(
   const gatewayUrl = `${AGGREGATOR_URL}/v1/blobs/${blobId}`;
   const walrusUri  = `walrus://${blobId}`;
 
-  return { blobId, guaranteedUntil, gatewayUrl, walrusUri };
+  return { blobId, guaranteedUntil, storageEpochs: epochs, mimeType, gatewayUrl, walrusUri };
 }
 
 /**

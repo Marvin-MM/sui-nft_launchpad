@@ -8,6 +8,7 @@ import NFTCard from '../components/NFTCard';
 import { toast } from 'react-hot-toast';
 import { useKiosk } from '../hooks/useKiosk';
 import ConfirmModal from '../components/ConfirmModal';
+import WalrusImage from '../components/WalrusImage';
 
 export default function MyCollection() {
   const account = useCurrentAccount();
@@ -118,19 +119,28 @@ export default function MyCollection() {
     if (!kioskObjects.length) return [];
     return kioskObjects.map((obj: any) => {
       const content = obj.data?.content as any;
-      const display = obj.data?.display?.data as any;
+      const display  = obj.data?.display?.data as any;
+      const fields   = content?.fields || {};
+
+      // `image_url` from the NFT Display is typically `walrus://<blobId>` after
+      // set_walrus_blob is called, or an HTTPS URL otherwise.
+      // WalrusImage / useWalrusImage handles both formats correctly.
+      const rawImageUrl =
+        display?.image_url ||
+        fields?.image_url ||
+        null;
+
       return {
-        id: obj.data?.objectId,
-        name: display?.name || content?.fields?.name || 'Sui Genesis Asset',
-        image: display?.image_url || `https://picsum.photos/seed/${obj.data?.objectId}/600/600`,
-        rarityScore: content?.fields?.rarity_score || 0,
-        staked: content?.fields?.staked || false,
-        traits: content?.fields?.traits || [],
-        // In a full implementation fetching from Kiosk dynamic fields, 
-        // these would be the specific Kiosk IDs the NFT is stored in.
-        // For demonstration of the 4-arg PTB, we mock them using the user's primary kiosk if found.
-        kioskId: kioskId,
-        kioskCapId: kioskCapId,
+        id:          obj.data?.objectId,
+        name:        display?.name || fields?.name || 'Sui Genesis Asset',
+        description: display?.description || fields?.description || '',
+        image:       rawImageUrl,
+        mimeType:    fields?.mime_type || undefined,
+        rarityScore: fields?.rarity_score || 0,
+        staked:      fields?.staked || false,
+        traits:      fields?.traits || [],
+        kioskId,
+        kioskCapId,
       };
     });
   }, [kioskObjects, kioskId, kioskCapId]);
@@ -199,17 +209,52 @@ export default function MyCollection() {
         toast.error('Staking pool not configured. Set VITE_STAKING_POOL_ID in .env');
         return;
       }
+
       try {
+        // ── Pre-flight: check if the NFT is LOCKED in the kiosk ────────────
+        // `staking::stake` calls `kiosk::take` internally.
+        // `kiosk::take` aborts with EItemIsLocked (code 8) if the NFT was
+        // placed via `kiosk::lock` (which the mint PTB always does, enforced
+        // by the TransferPolicy). We must detect this before building the tx.
+        // Sui kiosk creates TWO separate dynamic fields for locked items:
+        //   1. kiosk::Item<T>  { id: nft_id }  — the item storage slot
+        //   2. kiosk::Lock<T>  { id: nft_id }  — a boolean lock flag
+        // We must find ANY field whose name.type includes 'kiosk::Lock'.
+        const kioskFields = await suiClient.getDynamicFields({
+          parentId: selectedNft.kioskId,
+        });
+        const lockField = kioskFields.data.find(
+          (f: any) =>
+            f?.name?.type?.includes('kiosk::Lock') &&
+            (f?.name?.value?.id === selectedNft.id ||
+             String(f?.name?.value?.id).toLowerCase() === selectedNft.id.toLowerCase())
+        );
+        // Fallback: any Lock-type field at all (some RPC versions serialize value differently)
+        const hasAnyLock = kioskFields.data.some(
+          (f: any) => f?.name?.type?.includes('kiosk::Lock')
+        );
+        const isLocked = !!lockField || hasAnyLock;
+
+        if (isLocked) {
+          toast.error(
+            'Staking unavailable: Your NFT is locked in the Kiosk by the royalty TransferPolicy. ' +
+            'The staking contract (staking::stake) calls kiosk::take internally, which aborts on locked items. ' +
+            'This is a contract-level limitation — contact the collection admin to enable staking for locked NFTs.',
+            { duration: 10000, icon: '🔒' }
+          );
+          return;
+        }
+
         const tx = new Transaction();
-        
+
         // If the staking extension is not installed, add it first in the same PTB
         if (!stakingInstalled) {
           tx.moveCall({
             target: `${PACKAGE_ID}::staking::install_extension`,
             arguments: [
               tx.object(selectedNft.kioskId),
-              tx.object(selectedNft.kioskCapId)
-            ]
+              tx.object(selectedNft.kioskCapId),
+            ],
           });
         }
 
@@ -217,11 +262,11 @@ export default function MyCollection() {
         tx.moveCall({
           target: `${PACKAGE_ID}::staking::stake`,
           arguments: [
-            tx.object(STAKING_POOL_ID),            // &mut StakingPool
-            tx.object(selectedNft.kioskId),        // &mut Kiosk
-            tx.object(selectedNft.kioskCapId),     // &KioskOwnerCap
-            tx.pure.id(selectedNft.id),           // nft_id: ID
-          ]
+            tx.object(STAKING_POOL_ID),
+            tx.object(selectedNft.kioskId),
+            tx.object(selectedNft.kioskCapId),
+            tx.pure.id(selectedNft.id),
+          ],
         });
 
         signAndExecute(
@@ -231,16 +276,35 @@ export default function MyCollection() {
               toast.success('Asset successfully staked in Vault.');
               setActiveModal(null);
             },
-            onError: () => toast.error('Staking transaction failed.')
+            onError: (err: any) => {
+              const msg = err?.message || '';
+              if (msg.includes('abort code: 8') || msg.includes('EItemIsLocked')) {
+                toast.error(
+                  'Staking failed: NFT is locked in the Kiosk (EItemIsLocked). ' +
+                  'This NFT must be placed but not locked to stake.',
+                  { duration: 8000 }
+                );
+              } else if (msg.includes('abort code: 4') || msg.includes('EExtensionNotInstalled')) {
+                toast.error('Staking extension not installed. Please try again.');
+              } else {
+                toast.error('Staking transaction failed: ' + (msg || 'Unknown error'));
+              }
+            },
           }
         );
-      } catch (e) {
-        toast.error('Failed to construct staking PTB.');
+      } catch (e: any) {
+        console.error('Staking PTB error:', e);
+        toast.error('Failed to prepare staking transaction: ' + (e?.message || 'Unknown error'));
       }
     } else if (actionType === 'unstake') {
       // NOTE: Unstaking in the current contract (staking::unstake) requires &mut RewardMintCap.
-      // If RewardMintCap is not a shared object, normal users cannot execute this PTB.
-      toast.error('Unstaking currently disabled. Contract requires Admin RewardMintCap.');
+      // RewardMintCap is transferred to the deployer on init — it is not a shared object.
+      // Regular users cannot pass it in a PTB. This is a known contract limitation.
+      toast.error(
+        'Unstaking currently requires admin RewardMintCap. ' +
+        'Please contact the collection admin to unstake your NFT.',
+        { duration: 6000 }
+      );
     } else {
       toast.success(`${actionType} action submitted.`);
       setActiveModal(null);
@@ -408,11 +472,10 @@ export default function MyCollection() {
                 onClick={() => handleAction(nft, 'view')}
               >
                 <div className="aspect-square border border-white/10 overflow-hidden relative grayscale group-hover:grayscale-0 transition-all duration-700">
-                  <img 
+                  <WalrusImage 
                     src={nft.image} 
                     alt={nft.name} 
                     className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
                   />
                   {nft.staked && (
                     <div className="absolute top-0 right-0 px-4 py-2 bg-white text-black text-[9px] font-medium tracking-[0.4em] uppercase">
@@ -428,6 +491,11 @@ export default function MyCollection() {
                     </div>
                     <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-white transition-colors" />
                   </div>
+                  {typeof nft.description === 'string' && nft.description.trim() && (
+                    <p className="text-xs font-light text-white/40 line-clamp-2 leading-relaxed">
+                      {nft.description}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
@@ -446,11 +514,10 @@ export default function MyCollection() {
               className="max-w-[1200px] w-full grid grid-cols-1 lg:grid-cols-2 border border-white/10 bg-black relative max-h-[90vh] overflow-y-auto custom-scrollbar shadow-2xl"
             >
               <div className="aspect-square lg:border-r border-white/10 bg-white/1 relative flex items-center justify-center p-6 sm:p-12">
-                <img 
+                <WalrusImage 
                   src={selectedNft.image} 
                   alt={selectedNft.name} 
                   className="w-full h-full object-cover filter contrast-125 select-none"
-                  referrerPolicy="no-referrer"
                 />
                 <button 
                   onClick={() => setActiveModal(null)}
@@ -470,6 +537,11 @@ export default function MyCollection() {
                        <h2 className="text-4xl md:text-6xl font-light tracking-tighter uppercase leading-none">{selectedNft.name}</h2>
                        <p className="text-[10px] font-mono text-white/20 truncate">{selectedNft.id}</p>
                     </div>
+                    {typeof selectedNft.description === 'string' && selectedNft.description.trim() && (
+                      <p className="text-sm md:text-base font-light text-white/40 leading-relaxed border-l-2 border-white/20 pl-6 py-2">
+                        {selectedNft.description}
+                      </p>
+                    )}
 
                     <div className="p-10 border border-white/10 bg-white/1 space-y-6">
                        <div className="flex items-center gap-3 text-white/40">

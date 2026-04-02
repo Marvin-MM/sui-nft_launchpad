@@ -1,13 +1,17 @@
 import { motion } from 'framer-motion';
-import { MoreVertical, Lock, Unlock, Zap, Repeat, Flame, Layers, Eye } from 'lucide-react';
+import { MoreVertical, Lock, Unlock, Repeat, Flame, Layers, Eye } from 'lucide-react';
 import RarityBadge from './RarityBadge';
+import WalrusImage from './WalrusImage';
 
 interface NFTCardProps {
   key?: string | number;
   nft: {
     id: string;
     name: string;
-    image: string;
+    /** May be walrus://<blobId>, https://, or null. WalrusImage handles all cases. */
+    image: string | null;
+    /** Optional MIME type hint from upload time for faster display */
+    mimeType?: string;
     rarityScore: number;
     staked: boolean;
     traits: { key: string; value: string }[];
@@ -24,11 +28,16 @@ export default function NFTCard({ nft, onAction }: NFTCardProps) {
       className="glass-card group relative overflow-hidden transition-all duration-500 hover:border-accent-primary/50 hover:shadow-[0_0_40px_rgba(139,92,246,0.15)]"
     >
       <div className="relative aspect-square overflow-hidden">
-        <img 
-          src={nft.image} 
-          alt={nft.name} 
+        {/* WalrusImage resolves walrus:// URIs via the aggregator, detects MIME type
+            from file magic bytes, and renders a proper blob: URL */}
+        <WalrusImage
+          src={nft.image}
+          alt={nft.name}
+          mimeType={nft.mimeType}
           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-          referrerPolicy="no-referrer"
+          loadingPlaceholder={
+            <div className="w-full h-full bg-white/5 animate-pulse" />
+          }
         />
         <div className="absolute top-4 left-4">
           <RarityBadge score={nft.rarityScore} />
@@ -39,7 +48,7 @@ export default function NFTCard({ nft, onAction }: NFTCardProps) {
             STAKED
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
+        <div className="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
           <div className="grid grid-cols-2 gap-2">
             <button 
               onClick={() => onAction('view')}

@@ -21,9 +21,10 @@ import AIAdvisor from '../components/AIAdvisor';
 import { bcs } from '@mysten/sui/bcs';
 import { useKiosk } from '../hooks/useKiosk';
 import { resolveKioskArgs, finalizeKiosk } from '../lib/kioskUtils';
-import { generateMerkleProof } from '../lib/merkle';
+import { generateMerkleProof, isOnAllowlist } from '../lib/merkle';
 import ConfirmModal from '../components/ConfirmModal';
-import { uploadToWalrus, validateMintFile, walrusUriToGatewayUrl } from '../services/walrusService';
+import { uploadToWalrus, validateMintFile } from '../services/walrusService';
+import WalrusImage from '../components/WalrusImage';
 
 // ── Error map keyed on Move abort codes ──────────────────────────────────────
 const ERROR_MAP: Record<string, string> = {
@@ -41,6 +42,9 @@ type MintStep = 'upload' | 'mint' | 'walrus_link';
 interface WalrusUploadState {
   blobId: string;
   guaranteedUntil: number;
+  storageEpochs: number;
+  /** MIME type captured at upload time — passed to WalrusImage to set proper Content-Type */
+  mimeType: string;
   gatewayUrl: string;
   walrusUri: string;
   fileName: string;
@@ -71,6 +75,10 @@ export default function Mint() {
   const [confirmConfig, setConfirmConfig] = useState<{
     isOpen: boolean; action: 'mint' | 'reveal' | 'walrus_link' | null
   }>({ isOpen: false, action: null });
+
+  // ── NFT Metadata ──────────────────────────────────────────────────────────
+  const [nftName, setNftName]           = useState('');
+  const [nftDescription, setNftDescription] = useState('');
 
   // ── Walrus upload state ────────────────────────────────────────────────────
   const [walrusState, setWalrusState]   = useState<WalrusUploadState | null>(null);
@@ -117,9 +125,7 @@ export default function Mint() {
       const result = await uploadToWalrus(file);
       setUploadProgress(100);
       setWalrusState({ ...result, fileName: file.name, previewUrl: preview });
-      toast.success('Asset uploaded to Walrus!');
-      // Auto-advance to mint step
-      setTimeout(() => setStep('mint'), 500);
+      toast.success('Asset uploaded to Walrus! Please enter your NFT details below.');
     } catch (e: any) {
       toast.error(e.message || 'Walrus upload failed.');
       URL.revokeObjectURL(preview);
@@ -146,6 +152,26 @@ export default function Mint() {
   // ═══════════════════════════════════════════════════════════════════════════
   const handleMint = async () => {
     if (!account || !walrusState) return;
+
+    // ── Pre-flight guards ─────────────────────────────────────────────────
+    if (!TRANSFER_POLICY_ID) {
+      toast.error('TransferPolicy not configured. Set VITE_TRANSFER_POLICY_ID in .env');
+      return;
+    }
+    if (!PACKAGE_ID || !MINT_CONFIG_ID) {
+      toast.error('Contract not configured. Set VITE_PACKAGE_ID and VITE_MINT_CONFIG_ID in .env');
+      return;
+    }
+    if (!nftName.trim()) {
+      toast.error('Please enter a name for your NFT.');
+      return;
+    }
+    // Allowlist eligibility check (client-side only, contract also validates)
+    if (phase === 1 && !isOnAllowlist(account.address)) {
+      toast.error('Your wallet is not on the allowlist for this phase.');
+      return;
+    }
+
     setMinting(true);
 
     try {
@@ -153,11 +179,10 @@ export default function Mint() {
       const [feeCoin] = tx.splitCoins(tx.gas, [totalPrice]);
       const { kioskArg, capArg, isNew } = resolveKioskArgs(tx, kioskId, kioskCapId);
 
-      // Pass the Walrus gateway URL as image_url and walrus:// URI as thumbnail_url
-      // (thumbnail_url is used by on_chain_storage lookup and display standards)
-      const nftName        = new TextEncoder().encode('Sui Genesis NFT');
-      const nftDescription = new TextEncoder().encode('A Sui Genesis collection asset stored on Walrus.');
-      // image_url: initially a placeholder — will be updated by set_walrus_blob below
+      // Use user-provided name and description; fall back to sensible defaults.
+      const encodedName        = new TextEncoder().encode(nftName.trim() || 'Sui Genesis NFT');
+      const encodedDescription = new TextEncoder().encode(nftDescription.trim() || 'A Sui Genesis collection asset stored on Walrus.');
+      // image_url = walrus:// URI (will be rendered via Walrus gateway by Display)
       const nftImageUrl    = new TextEncoder().encode(walrusState.walrusUri);
       const nftThumbUrl    = new TextEncoder().encode(walrusState.walrusUri);
 
@@ -176,8 +201,8 @@ export default function Mint() {
             kioskArg,
             capArg,
             tx.object(TRANSFER_POLICY_ID),
-            tx.pure.vector('u8', nftName),
-            tx.pure.vector('u8', nftDescription),
+            tx.pure.vector('u8', encodedName),
+            tx.pure.vector('u8', encodedDescription),
             tx.pure.vector('u8', nftImageUrl),
             tx.pure.vector('u8', nftThumbUrl),
           ],
@@ -208,8 +233,8 @@ export default function Mint() {
             kioskArg,
             capArg,
             tx.object(TRANSFER_POLICY_ID),
-            tx.pure.vector('u8', nftName),
-            tx.pure.vector('u8', nftDescription),
+            tx.pure.vector('u8', encodedName),
+            tx.pure.vector('u8', encodedDescription),
             tx.pure.vector('u8', nftImageUrl),
             tx.pure.vector('u8', nftThumbUrl),
             tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize(merkleProof)),
@@ -228,10 +253,13 @@ export default function Mint() {
               options: { showObjectChanges: true },
             });
 
-            const created = txResult.objectChanges?.filter((c: any) => c.type === 'created') || [];
+            const allChanges = txResult.objectChanges || [];
 
+            // ── Commit-reveal: look for the commitment object ─────────────────
             if (mintStrategy === 'commit') {
-              const commitObj = created.find((o: any) => o.objectType?.includes('MintCommitment'));
+              const commitObj = allChanges.find((o: any) =>
+                (o.type === 'created') && o.objectType?.includes('MintCommitment')
+              );
               if (commitObj) {
                 setPendingCommitment((commitObj as any).objectId);
                 setMinting(false);
@@ -239,32 +267,88 @@ export default function Mint() {
               }
             }
 
-            // Find the SuiNFT object specifically (filter by our NFT type)
-            const nftObj = created.find((o: any) =>
+            // ── Extract kiosk + cap IDs from objectChanges ────────────────────
+            // For first-time users (isNew===true), kioskId/kioskCapId from the
+            // hook are still undefined. Extract directly from objectChanges.
+            const newKioskObj = allChanges.find((o: any) =>
+              (o.type === 'created') && o.objectType?.includes('0x2::kiosk::Kiosk')
+            );
+            const newKioskCapObj = allChanges.find((o: any) =>
+              (o.type === 'created') && o.objectType?.includes('0x2::kiosk::KioskOwnerCap')
+            );
+
+            const resolvedKioskId    = (newKioskObj as any)?.objectId    || kioskId    || '';
+            const resolvedKioskCapId = (newKioskCapObj as any)?.objectId || kioskCapId || '';
+
+            // ── Find the SuiNFT object ID ─────────────────────────────────────
+            // STAGE 1 (fast path): scan objectChanges for our NFT type.
+            // This works when the NFT appears as 'created' with no immediate wrap.
+            let nftId: string | null = null;
+            const nftObjFast = allChanges.find((o: any) =>
               o.objectType?.includes('::nft::SuiNFT') ||
               o.objectType === NFT_TYPE
             );
-            const nftId = nftObj ? (nftObj as any).objectId : null;
+            if (nftObjFast) {
+              nftId = (nftObjFast as any).objectId;
+            }
 
-            // Find kiosk objects in case a new one was created
-            await refetchKiosk();
+            // STAGE 2 (authoritative fallback): when mint_to_kiosk creates the
+            // NFT and immediately calls kiosk::lock in the same PTB, Sui's
+            // objectChanges optimises the object away (it was never "live" on-chain
+            // before being wrapped). We query the kiosk's dynamic fields instead —
+            // kiosk::Item<SuiNFT> entries have the NFT's ID as their key.
+            if (!nftId && resolvedKioskId) {
+              for (let attempt = 0; attempt < 4; attempt++) {
+                try {
+                  const kioskFields = await suiClient.getDynamicFields({
+                    parentId: resolvedKioskId,
+                  });
+                  // Filter for kiosk Item fields (locked NFTs)
+                  const itemFields = kioskFields.data.filter((f: any) =>
+                    f?.name?.type?.includes('kiosk::Item')
+                  );
+                  if (itemFields.length > 0) {
+                    // Sort descending by version to get the most recently added NFT
+                    const sorted = [...itemFields].sort(
+                      (a: any, b: any) => Number(b.version || 0) - Number(a.version || 0)
+                    );
+                    
+                    // We need to ensure we don't just grab an old NFT from their existing kiosk.
+                    // But if this is a fresh kiosk, any item is the new one.
+                    // If it's an existing kiosk, grabbing the highest version usually works.
+                    nftId = (sorted[0] as any)?.name?.value?.id || null;
+                    
+                    if (nftId) {
+                      break; // Found it!
+                    }
+                  }
+                } catch (kioskErr) {
+                  console.warn(`[Mint] Kiosk field query failed (attempt ${attempt + 1}):`, kioskErr);
+                }
+                
+                // Wait 1 second before retrying to give indexer time to catch up
+                if (!nftId) await new Promise((r) => setTimeout(r, 1000));
+              }
+            }
+
+            // Trigger the kiosk hook to re-fetch in the background
+            refetchKiosk();
+
+            setMintedNft({
+              objectId:   nftId || '',
+              kioskId:    resolvedKioskId,
+              kioskCapId: resolvedKioskCapId,
+              name:       nftName.trim() || 'Sui Genesis NFT',
+              walrusUri:  walrusState?.walrusUri,
+            });
 
             if (nftId) {
-              setMintedNft({
-                objectId: nftId,
-                kioskId:    kioskId || '',
-                kioskCapId: kioskCapId || '',
-                name: 'Sui Genesis NFT',
-                walrusUri: walrusState?.walrusUri,
-              });
-              // Advance to Walrus link step
-              setStep('walrus_link');
+              toast.success('Mint confirmed! NFT detected. Proceed to link Walrus storage.');
             } else {
-              // NFT is in the kiosk — object change type may be 'mutated' not 'created'
-              // Surface success and let user link Walrus manually
-              toast.success('Mint successful! Proceed to link your Walrus asset.');
-              setStep('walrus_link');
+              toast.success('Mint successful! Paste your NFT ID below to link Walrus storage.');
             }
+            setStep('walrus_link');
+
           } catch (e) {
             console.error('Failed to parse TX result:', e);
             toast.success('Mint successful! Proceed to link your Walrus asset.');
@@ -291,17 +375,8 @@ export default function Mint() {
   const handleLinkWalrus = async () => {
     if (!account || !walrusState) return;
 
-    // Validate the blob hasn't expired relative to current epoch
-    if (walrusState.guaranteedUntil <= currentEpoch) {
-      toast.error(
-        `Walrus blob storage expired at epoch ${walrusState.guaranteedUntil}. ` +
-        `Current epoch is ${currentEpoch}. Please re-upload the asset.`
-      );
-      return;
-    }
-
     if (!mintedNft?.objectId) {
-      toast.error('Could not find your minted NFT object. Please enter the ID manually.');
+      toast.error('Could not find your minted NFT object. Please ensure the mint transaction was confirmed.');
       return;
     }
 
@@ -313,6 +388,13 @@ export default function Mint() {
       return;
     }
 
+    // IMPORTANT: epoch_until must be a Sui epoch, NOT a Walrus epoch.
+    // Walrus and Sui use separate epoch counters. We compute the correct
+    // Sui epoch by adding the number of requested Walrus storage epochs
+    // to the current Sui epoch. +1 ensures strictly-greater-than as
+    // required by the on_chain_storage contract assertion.
+    const epochUntil = currentEpoch + (walrusState.storageEpochs ?? 5) + 1;
+
     setLinkingWalrus(true);
     try {
       const tx = new Transaction();
@@ -321,11 +403,11 @@ export default function Mint() {
       tx.moveCall({
         target: `${PACKAGE_ID}::on_chain_storage::set_walrus_blob`,
         arguments: [
-          tx.object(resolvedKioskId),                              // &mut Kiosk
-          tx.object(resolvedKioskCapId),                           // &KioskOwnerCap
-          tx.pure.id(mintedNft.objectId),                         // nft_id: ID
-          tx.pure.vector('u8', new TextEncoder().encode(walrusState.blobId)), // blob_id
-          tx.pure.u64(walrusState.guaranteedUntil),               // epoch_until: u64
+          tx.object(resolvedKioskId),
+          tx.object(resolvedKioskCapId),
+          tx.pure.id(mintedNft.objectId),
+          tx.pure.vector('u8', new TextEncoder().encode(walrusState.blobId)), // blob_id bytes
+          tx.pure.u64(epochUntil), // Sui epoch_until > tx_context::epoch(ctx)
         ],
       });
 
@@ -523,7 +605,13 @@ export default function Mint() {
                   </div>
                 ) : walrusState ? (
                   <div className="flex flex-col items-center gap-4 text-center">
-                    <img src={walrusState.previewUrl} alt="preview" className="w-32 h-32 object-cover border border-white/10" />
+                    <WalrusImage
+                      src={walrusState.walrusUri}
+                      mimeType={walrusState.mimeType}
+                      alt="preview"
+                      className="w-32 h-32 object-cover border border-white/10"
+                      fallbackSrc={walrusState.previewUrl}
+                    />
                     <CheckCircle2 className="w-6 h-6 text-emerald-500" />
                     <div>
                       <p className="text-[10px] font-medium tracking-[0.4em] uppercase text-emerald-400">UPLOAD COMPLETE</p>
@@ -545,6 +633,36 @@ export default function Mint() {
                 )}
               </div>
 
+              {/* NFT metadata inputs — shown after upload succeeds */}
+              {walrusState && (
+                <div className="space-y-4 border border-white/10 p-6 bg-white/1">
+                  <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">NFT_METADATA</p>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-medium tracking-[0.4em] text-white/20 uppercase">Name <span className="text-red-400">*</span></label>
+                      <input
+                        type="text"
+                        value={nftName}
+                        onChange={e => setNftName(e.target.value)}
+                        maxLength={64}
+                        placeholder="e.g. Genesis #001"
+                        className="w-full bg-transparent border-b border-white/20 focus:border-white py-2 text-sm text-white placeholder-white/20 focus:outline-none transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-medium tracking-[0.4em] text-white/20 uppercase">Description</label>
+                      <textarea
+                        value={nftDescription}
+                        onChange={e => setNftDescription(e.target.value)}
+                        maxLength={256}
+                        rows={3}
+                        placeholder="Describe your NFT asset..."
+                        className="w-full bg-transparent border border-white/10 focus:border-white/30 p-3 text-sm text-white placeholder-white/20 focus:outline-none resize-none transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
               {walrusState && (
                 <div className="border border-white/10 p-6 space-y-3 bg-white/1">
                   <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">WALRUS BLOB INFO</p>
@@ -651,7 +769,17 @@ export default function Mint() {
                 </div>
               </div>
 
-              {/* Phase warning if paused */}
+              {/* Allowlist warning */}
+              {phase === 1 && account && !isOnAllowlist(account.address) && (
+                <div className="flex items-center gap-3 border border-red-500/20 p-4 bg-red-500/5">
+                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                  <p className="text-[10px] font-medium tracking-[0.2em] uppercase text-red-400">
+                    Your wallet is not on the allowlist. Minting will fail until the admin adds you or opens public phase.
+                  </p>
+                </div>
+              )}
+
+              {/* Phase paused warning */}
               {phase === 0 && (
                 <div className="flex items-center gap-3 border border-amber-500/20 p-4 bg-amber-500/5">
                   <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
@@ -711,20 +839,30 @@ export default function Mint() {
               {walrusState && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="border border-white/10 p-6 space-y-4 bg-white/1">
-                    <img src={walrusState.previewUrl} alt="preview" className="w-full aspect-square object-cover border border-white/10" />
-                    <a href={walrusState.gatewayUrl} target="_blank" rel="noopener noreferrer"
+                    {/* WalrusImage fetches bytes, detects MIME type, builds a proper blob: URL */}
+                    <WalrusImage
+                      src={walrusState.walrusUri}
+                      mimeType={walrusState.mimeType}
+                      alt="preview"
+                      className="w-full aspect-square object-cover border border-white/10"
+                      fallbackSrc={walrusState.previewUrl}
+                    />
+                    {/* Trigger download instead of opening raw binary in browser tab */}
+                    <a
+                      href={walrusState.gatewayUrl}
+                      download={walrusState.fileName || 'nft-asset'}
                       className="inline-flex items-center gap-2 text-[10px] text-white/40 hover:text-white transition-colors uppercase tracking-widest"
                     >
-                      <ExternalLink className="w-3 h-3" /> View on Walrus
+                      <ExternalLink className="w-3 h-3" /> Download from Walrus
                     </a>
                   </div>
                   <div className="border border-white/10 p-6 space-y-4 bg-white/1">
                     <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">ON-CHAIN STORAGE REF</p>
                     {[
-                      { label: 'Blob ID',       value: walrusState.blobId.slice(0, 24) + '...' },
-                      { label: 'Storage Type',  value: 'WALRUS (type=2)' },
-                      { label: 'Guaranteed',    value: `Until epoch ${walrusState.guaranteedUntil}` },
-                      { label: 'NFT Object ID', value: mintedNft?.objectId ? mintedNft.objectId.slice(0, 12) + '...' : 'Resolving...' },
+                      { label: 'Blob ID',           value: walrusState.blobId.slice(0, 24) + '...' },
+                      { label: 'Storage Type',      value: 'WALRUS (type=2)' },
+                      { label: 'Walrus Guaranteed', value: `Until Walrus epoch ${walrusState.guaranteedUntil}` },
+                      { label: 'Sui Epoch Until',   value: `${currentEpoch + (walrusState.storageEpochs ?? 5) + 1} (current: ${currentEpoch})` },
                     ].map(row => (
                       <div key={row.label} className="flex justify-between border-b border-white/5 pb-3">
                         <p className="text-[9px] font-medium tracking-[0.2em] text-white/20 uppercase">{row.label}</p>
@@ -732,19 +870,37 @@ export default function Mint() {
                       </div>
                     ))}
 
-                    {walrusState.guaranteedUntil <= currentEpoch && (
-                      <div className="flex items-center gap-2 text-amber-500 border border-amber-500/20 p-3 bg-amber-500/5">
-                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                        <p className="text-[9px] uppercase tracking-wider">Blob storage expired. Re-upload required.</p>
-                      </div>
-                    )}
+                    {/* NFT Object ID — auto-detected or manual fallback */}
+                    <div className="space-y-2">
+                      <p className="text-[9px] font-medium tracking-[0.2em] text-white/20 uppercase">NFT Object ID</p>
+                      {mintedNft?.objectId ? (
+                        <p className="text-[10px] font-medium font-mono text-emerald-400 break-all">
+                          {mintedNft.objectId}
+                        </p>
+                      ) : (
+                        <div className="space-y-1">
+                          <input
+                            type="text"
+                            placeholder="Paste your NFT object ID (0x...)"
+                            className="w-full bg-transparent border-b border-amber-500/40 focus:border-amber-500 py-1 text-[10px] text-white font-mono placeholder-white/20 focus:outline-none transition-colors"
+                            onChange={e => {
+                              const v = e.target.value.trim();
+                              if (v.startsWith('0x') && v.length > 10) {
+                                setMintedNft(prev => prev ? { ...prev, objectId: v } : null);
+                              }
+                            }}
+                          />
+                          <p className="text-[9px] text-amber-500/70 uppercase tracking-wider">Could not auto-detect. Find it on Suiscan or My Collection.</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
               <button
                 onClick={() => setConfirmConfig({ isOpen: true, action: 'walrus_link' })}
-                disabled={linkingWalrus || !walrusState || walrusState.guaranteedUntil <= currentEpoch}
+                disabled={linkingWalrus || !walrusState || !mintedNft?.objectId}
                 className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 {linkingWalrus ? (
