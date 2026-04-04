@@ -210,7 +210,7 @@ export default function RentalMarketplace() {
               className="group cursor-pointer space-y-6"
               onClick={() => setSelectedNft(nft)}
             >
-              <div className="relative aspect-3/4 overflow-hidden rounded-2xl bg-white/2">
+              <div className="relative aspect-3/4 overflow-hidden rounded bg-white/2">
                 <WalrusImage 
                   src={nft.image} 
                   alt={nft.name} 

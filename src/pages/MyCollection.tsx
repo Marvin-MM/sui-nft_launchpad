@@ -9,6 +9,7 @@ import { toast } from 'react-hot-toast';
 import { useKiosk } from '../hooks/useKiosk';
 import ConfirmModal from '../components/ConfirmModal';
 import WalrusImage from '../components/WalrusImage';
+import useRewardToken from '../hooks/useRewardToken';
 
 export default function MyCollection() {
   const account = useCurrentAccount();
@@ -63,6 +64,8 @@ export default function MyCollection() {
     { id: STAKING_POOL_ID, options: { showContent: true } },
     { enabled: !!STAKING_POOL_ID }
   );
+
+  const { balance: sgrBalance, loading: sgrLoading, symbol: sgrSymbol } = useRewardToken();
 
   const [kioskObjects, setKioskObjects] = useState<any[]>([]);
   const [loadingKiosk, setLoadingKiosk] = useState(false);
@@ -357,6 +360,19 @@ export default function MyCollection() {
             <button className="w-full py-6 border border-white text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white hover:text-black transition-all">
               REFRESH_STATE
             </button>
+          </div>
+
+          <div className="space-y-12">
+            <div className="flex items-center gap-2 text-white/20">
+               <Coins className="w-3 h-3" />
+               <p className="text-[10px] font-medium tracking-[0.4em] uppercase">REWARD_BALANCE</p>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-5xl lg:text-7xl font-light tracking-tighter text-white">
+                {sgrLoading ? '—' : sgrBalance}
+              </h2>
+              <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">{sgrSymbol || 'SGR'}</p>
+            </div>
           </div>
 
           <div className="space-y-12">

@@ -48,7 +48,7 @@ export default function AIAdvisor() {
           >
             <div className="flex gap-4">
                <span className="text-[10px] font-mono text-white/20">LOG_01:</span>
-               <p className="text-xl font-light text-white leading-relaxed italic border-l border-white/10 pl-6">
+               <p className="text-xl font-light text-white leading-relaxed border-l border-white/10 pl-6">
                  "{advice}"
                </p>
             </div>

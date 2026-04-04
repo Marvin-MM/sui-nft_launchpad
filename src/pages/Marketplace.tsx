@@ -406,7 +406,7 @@ export default function Marketplace() {
               className="group cursor-pointer space-y-6"
               onClick={() => setSelectedNft(nft)}
             >
-              <div className="relative aspect-3/4 overflow-hidden rounded-2xl bg-white/2">
+              <div className="relative aspect-3/4 overflow-hidden rounded bg-white/2">
                 <WalrusImage 
                   src={nft.image} 
                   alt={nft.name} 
@@ -458,34 +458,34 @@ export default function Marketplace() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl"
+            className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6 bg-black/95 backdrop-blur-3xl"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="max-w-[1000px] w-full grid grid-cols-1 md:grid-cols-2 border border-white/10 bg-black overflow-hidden relative"
+              className="max-w-[1000px] w-full grid grid-cols-1 md:grid-cols-2 border border-white/10 bg-black relative max-h-[95vh] sm:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <button 
                 onClick={() => setSelectedNft(null)}
-                className="absolute top-6 right-6 p-2 z-10 text-white/40 hover:text-white transition-colors"
+                className="absolute top-4 right-4 md:top-6 md:right-6 p-2 z-10 text-white/40 hover:text-white bg-black/50 md:bg-transparent rounded-full backdrop-blur-md md:backdrop-blur-none transition-colors"
                 title="CLOSE_WINDOW"
               >
                 <X className="w-6 h-6" />
               </button>
 
-              <div className="aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
+              <div className="h-64 sm:h-80 md:h-auto md:aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
                 <WalrusImage 
                   src={selectedNft.image} 
                   alt={selectedNft.name} 
                   className="w-full h-full object-cover filter contrast-125 select-none"
                 />
-                <div className="absolute top-6 left-6">
+                <div className="absolute top-4 left-4 md:top-6 md:left-6">
                   <RarityBadge score={selectedNft.rarityScore} />
                 </div>
               </div>
               
-              <div className="p-8 md:p-12 lg:p-16 flex flex-col justify-between space-y-12 overflow-y-auto max-h-[85vh] custom-scrollbar">
+              <div className="p-6 sm:p-8 md:p-12 lg:p-16 flex flex-col justify-between space-y-12">
                 
                 <div className="space-y-10">
                   <div className="space-y-4">

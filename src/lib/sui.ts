@@ -14,6 +14,7 @@ export const TRANSFER_POLICY_ID = import.meta.env.VITE_TRANSFER_POLICY_ID || '';
 export const COMMIT_REVEAL_CONFIG_ID = import.meta.env.VITE_COMMIT_REVEAL_CONFIG_ID || '';
 export const DUTCH_AUCTION_ID        = import.meta.env.VITE_DUTCH_AUCTION_ID        || '';
 export const STAKING_POOL_ID         = import.meta.env.VITE_STAKING_POOL_ID         || '';
+export const REWARD_MINT_CAP_ID      = import.meta.env.VITE_REWARD_MINT_CAP_ID      || '';
 export const UPGRADE_CONFIG_ID       = import.meta.env.VITE_UPGRADE_CONFIG_ID       || '';
 export const RENTAL_POLICY_ID        = import.meta.env.VITE_RENTAL_POLICY_ID        || '';
 
@@ -25,6 +26,13 @@ export const SUI_RANDOM_ID = '0x8';
 // CORRECT: SuiNFT is in nft_app::nft, NOT mint. AdminCap is in mint.
 export const NFT_TYPE       = `${PACKAGE_ID}::nft::SuiNFT`;
 export const ADMIN_CAP_TYPE = `${PACKAGE_ID}::mint::AdminCap`;
+// ── Reward Token Type (on-chain SGR) ───────────────────────────────────────
+// The Move module `nft_app::reward_token` registers a fungible token with
+// symbol "SGR" and 9 decimals. Clients can use this type string to query
+// coin metadata and balances via the Sui RPC.
+export const REWARD_TOKEN_TYPE    = `${PACKAGE_ID}::reward_token::REWARD_TOKEN`;
+export const REWARD_TOKEN_SYMBOL  = 'SGR';
+export const REWARD_TOKEN_DECIMALS = 9;
 
 // ── Network Config ──────────────────────────────────────────────────────────
 export const { networkConfig } = createNetworkConfig({

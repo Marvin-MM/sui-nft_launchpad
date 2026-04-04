@@ -73,7 +73,7 @@ export default function LiveActivityFeed() {
       <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
         <AnimatePresence initial={false}>
           {events.length === 0 && (
-            <p className="text-xs font-light tracking-widest text-white/20 italic">Awaiting network confirmation events...</p>
+            <p className="text-xs font-light tracking-widest text-white/20">Awaiting network confirmation events...</p>
           )}
           {events.map((event) => (
              <motion.div

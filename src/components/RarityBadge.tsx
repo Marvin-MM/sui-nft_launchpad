@@ -17,10 +17,10 @@ export default function RarityBadge({ score }: RarityBadgeProps) {
 
   return (
     <div className="flex items-center gap-2">
-      <div className={`px-3 py-1 rounded-full bg-gradient-to-r ${tier.color} text-[10px] font-black italic tracking-widest uppercase shadow-lg ${tier.shadow}`}>
+      <div className={`px-3 py-1 rounded bg-linear-to-r ${tier.color} text-[10px] font-black tracking-widest uppercase shadow-lg ${tier.shadow}`}>
         {tier.label}
       </div>
-      <div className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] font-black italic tracking-widest uppercase text-white/60">
+      <div className="px-3 py-1 rounded bg-white/5 border border-white/10 text-[10px] font-black tracking-widest uppercase text-white/60">
         SCORE: {score}
       </div>
     </div>
