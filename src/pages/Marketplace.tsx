@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClientQuery, useSuiClient } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
-import { Search, Filter, ShoppingBag, Tag, TrendingUp, X, Sparkles, Info, Loader2, InfoIcon, BarChart3 } from 'lucide-react';
+import { Search, Filter, ShoppingBag, Tag, TrendingUp, X, Sparkles, Info, Loader2, InfoIcon, BarChart3, Lock } from 'lucide-react';
 import RarityBadge from '../components/RarityBadge';
 import PriceChart from '../components/PriceChart';
 import WalrusImage from '../components/WalrusImage';
@@ -176,7 +176,7 @@ export default function Marketplace() {
       toast.error(
         'This NFT is not listed for sale. ' +
         'The owner must list it from their My Collection page first.',
-        { duration: 7000, icon: '🔒' }
+        { duration: 7000, icon: Lock }
       );
       return;
     }
@@ -575,7 +575,7 @@ export default function Marketplace() {
                   {!selectedNft.isListed && (
                     <div className="border border-amber-500/20 bg-amber-500/5 p-4 text-center">
                       <p className="text-[10px] font-medium tracking-[0.3em] text-amber-400 uppercase">
-                        🔒 NOT LISTED — Owner must list this NFT for sale from their My Collection
+                        <Lock className="w-4 h-4 inline mr-2" /> NOT LISTED — Owner must list this NFT for sale from their My Collection
                       </p>
                     </div>
                   )}
@@ -600,7 +600,7 @@ export default function Marketplace() {
                       </>
                     ) : (
                       <>
-                        🔒 NOT LISTED FOR SALE
+                        <Lock className="w-4 h-4 inline mr-2" /> NOT LISTED FOR SALE
                       </>
                     )}
                   </button>
