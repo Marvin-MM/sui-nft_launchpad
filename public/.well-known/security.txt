@@ -1,0 +1,19 @@
+Contact: security@suigenesis.app
+Expires: 2027-04-04T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://suigenesis.app/.well-known/security.txt
+Policy: https://suigenesis.app/security-policy
+Acknowledgments: https://suigenesis.app/security-acknowledgments
+
+# Sui Genesis Protocol Security Policy
+# Report security vulnerabilities at: security@suigenesis.app
+# Do not open public issues for security vulnerabilities
+
+# We commit to:
+# - Responding to security reports within 48 hours
+# - Investigating reported vulnerabilities thoroughly  
+# - Providing regular security updates
+# - Crediting responsible disclosure researchers
+
+# For responsible disclosure guidelines, see:
+# https://suigenesis.app/security-policy

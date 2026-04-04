@@ -1,0 +1,36 @@
+/* HUMANS.TXT
+   Web Craftsmanship and Attribution
+   Built on Sui Blockchain
+   ═══════════════════════════════════════════════════════════════════*/
+
+TEAM
+  Name: Sui Genesis Protocol
+  Site: https://suigenesis.app
+  Twitter: @suigenesis
+  
+THANKS
+  Built with React, TypeScript, Vite
+  Blockchain: Sui Network (https://sui.io)
+  Walrus Storage: https://walrus.space
+  UI Framework: Tailwind CSS 
+  Icons: Lucide React
+  Animations: Framer Motion
+  State: Zustand
+  Form Handling: React Hook Form
+  HTTP Client: @mysten/sui
+  Wallet Integration: @mysten/dapp-kit
+
+STANDARDS
+  HTML5: https://html.spec.whatwg.org/
+  CSS: https://www.w3.org/Style/CSS/
+  Accessibility: WCAG 2.1 Level AA
+  Mobile First Responsive Design
+
+TECHNOLOGY
+  Frontend: React + TypeScript + Vite
+  Styling: Tailwind CSS 4
+  Smart Contracts: Move Language on Sui
+  Storage: Walrus Decentralized Storage
+  Wallet Integration: @mysten/dapp-kit
+
+LAST UPDATED: 2026-04-04

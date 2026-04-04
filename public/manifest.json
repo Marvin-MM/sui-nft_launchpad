@@ -1,0 +1,66 @@
+{
+  "name": "Sui Genesis - NFT Launchpad & Marketplace",
+  "short_name": "Sui Genesis",
+  "description": "Premium NFT Launchpad & Marketplace on Sui Blockchain",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#000000",
+  "theme_color": "#2196C9",
+  "categories": ["blockchain", "cryptocurrency", "nft"],
+  "screenshots": [
+    {
+      "src": "/sg-logo.svg",
+      "sizes": "380x210",
+      "type": "image/svg+xml",
+      "form_factor": "wide"
+    }
+  ],
+  "icons": [
+    {
+      "src": "/src/assets/favico.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mint NFT",
+      "short_name": "Mint",
+      "description": "Mint a new NFT from the Genesis collection",
+      "url": "/mint",
+      "icons": [
+        {
+          "src": "/src/assets/favico.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Marketplace",
+      "short_name": "Marketplace",
+      "description": "Browse and trade NFTs on the secondary market",
+      "url": "/marketplace",
+      "icons": [
+        {
+          "src": "/src/assets/favico.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "My Collection",
+      "short_name": "Collection",
+      "description": "View and manage your NFT collection",
+      "url": "/collection",
+      "icons": [
+        {
+          "src": "/src/assets/favico.svg",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "start": "node server.ts"
+    "start": "node server.ts",
+    "seo:check": "echo '📋 SEO Files Check:' && ls -lah public/{robots.txt,sitemap.xml,manifest.json,sg-logo.svg,humans.txt,SEO-GUIDE.md} && echo '✅ All SEO files present'",
+    "seo:audit": "echo '🔍 Run Lighthouse audit: lighthouse https://yourdomain.com --view' && echo '📊 Check Google Search Console: https://search.google.com/search-console' && echo '📱 Test Mobile: https://search.google.com/test/mobile-friendly'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
