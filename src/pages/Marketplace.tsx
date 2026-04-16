@@ -7,7 +7,7 @@ import RarityBadge from '../components/RarityBadge';
 import PriceChart from '../components/PriceChart';
 import WalrusImage from '../components/WalrusImage';
 import { toast } from 'react-hot-toast';
-import { formatSui, NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, TRANSFER_POLICY_ID } from '../lib/sui';
+import { formatSui, NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, TRANSFER_POLICY_ID, MARKETPLACE_CONFIG_ID } from '../lib/sui';
 import { aiService, AIPriceEstimate } from '../services/aiService';
 import { useKiosk } from '../hooks/useKiosk';
 import { resolveKioskArgs, finalizeKiosk } from '../lib/kioskUtils';
@@ -43,7 +43,10 @@ export default function Marketplace() {
     async function fetchObjects() {
       if (!eventData?.data) return;
 
-      const nftInfoMap: Record<string, { feePaid: string }> = {};
+      // NOTE: In production, also query getDynamicFields({ parentId: MARKETPLACE_CONFIG_ID })
+      // for the most accurate listing state — it reflects delists and expiries that
+      // events alone cannot capture (events are append-only and stale after state changes).
+      const nftInfoMap: Record<string, { feePaid: string; expiresAt?: number }> = {};
       const objectIds = eventData.data
         .filter((e: any) => e.parsedJson?.nft_id)
         .map((e: any) => {
@@ -119,6 +122,7 @@ export default function Marketplace() {
               _isListed: isListed,
               _listingPriceMist: listingPriceMist,
               _sellerKioskInitialVersion: sellerKioskInitialVersion,
+              _expiresAt: nftInfoMap[obj.data?.objectId]?.expiresAt || 0,
             };
           })
         );
@@ -160,6 +164,7 @@ export default function Marketplace() {
         isListed:                    obj._isListed as boolean,
         traits:                      content?.fields?.traits || [],
         status:                      obj._isListed ? 'LISTED' : 'IN_KIOSK',
+        expiresAt:                   obj._expiresAt || 0,
       };
     });
   }, [objectsData]);
@@ -171,28 +176,26 @@ export default function Marketplace() {
   const handleBuy = async (nft: any) => {
     if (!account) return;
 
-    // ── Guard 1: NFT must be actively listed via kiosk::list ─────────────────
     if (!nft.isListed) {
-      toast.error(
-        'This NFT is not listed for sale. ' +
-        'The owner must list it from their My Collection page first.',
-        { duration: 7000, icon: Lock }
-      );
+      toast.error('This NFT is not currently listed for sale.', { duration: 7000, icon: '🔒' });
       return;
     }
 
-    // ── Guard 2: We need the seller kiosk ID and its shared version ──────────
     if (!nft.sellerKioskId) {
-      toast.error('Cannot resolve seller kiosk. Please refresh and try again.');
+      toast.error('Cannot resolve seller kiosk. Please refresh.');
       return;
     }
 
     if (!TRANSFER_POLICY_ID) {
-      toast.error('TransferPolicy not configured. Set VITE_TRANSFER_POLICY_ID in .env');
+      toast.error('TransferPolicy not configured.');
       return;
     }
 
-    // ── Guard 3: Buyer cannot buy their own NFT ───────────────────────────────
+    if (!MARKETPLACE_CONFIG_ID) {
+      toast.error('Marketplace not configured. Set VITE_MARKETPLACE_CONFIG_ID in .env');
+      return;
+    }
+
     if (nft.seller === account.address) {
       toast.error('You cannot purchase your own NFT.');
       return;
@@ -205,17 +208,13 @@ export default function Marketplace() {
       // ── Resolve buyer's kiosk ─────────────────────────────────────────────
       const { kioskArg, capArg, isNew } = resolveKioskArgs(tx, kioskId, kioskCapId);
 
-      // ── Use the on-chain listing price (exact, in MIST) ───────────────────
       const priceInMist = BigInt(nft.priceMist || '0');
-
-      // ── 1. Split payment coin ─────────────────────────────────────────────
       const [paymentCoin] = tx.splitCoins(tx.gas, [priceInMist]);
 
-      // ── 2. Reference the seller's kiosk as a SHARED object ───────────────
-      // Using sharedObjectRef with explicit initialSharedVersion prevents the
-      // "Objects owned by other objects" validation error. The SDK's plain
-      // tx.object() sometimes fails to classify the kiosk as shared when it
-      // encounters child NFTs during PTB object resolution.
+      // 6% royalty buffer (contract returns change)
+      const royaltyBuffer = BigInt(Math.ceil(Number(priceInMist) * 0.06));
+      const [royaltyCoin] = tx.splitCoins(tx.gas, [royaltyBuffer]);
+
       let sellerKioskArg;
       if (nft.sellerKioskInitialVersion) {
         sellerKioskArg = tx.sharedObjectRef({
@@ -227,55 +226,18 @@ export default function Marketplace() {
         sellerKioskArg = tx.object(nft.sellerKioskId);
       }
 
-      // ── 3. Execute kiosk::purchase ────────────────────────────────────────
-      // kiosk::purchase extracts the NFT from the seller's kiosk and
-      // returns: (NFT object, TransferRequest hot-potato)
-      const [purchasedItem, transferRequest] = tx.moveCall({
-        target: '0x2::kiosk::purchase',
-        typeArguments: [NFT_TYPE],
+      // marketplace::purchase_nft handles kiosk::purchase + royalty::pay + lock + confirm internally
+      tx.moveCall({
+        target: `${PACKAGE_ID}::marketplace::purchase_nft`,
         arguments: [
+          tx.object(MARKETPLACE_CONFIG_ID),
           sellerKioskArg,
-          tx.pure.id(nft.id),
-          paymentCoin,
-        ],
-      });
-
-      // ── 4. Pay royalty — satisfies the royalty::Rule in the TransferPolicy
-      // royalty::pay takes (&mut TransferPolicy, &mut TransferRequest, Coin<SUI>, ctx)
-      // Overpay slightly (5% + buffer); contract returns change to sender.
-      // The &mut TransferRequest borrow means transferRequest is still usable after.
-      const royaltyBuffer = BigInt(Math.ceil(Number(priceInMist) * 0.06)); // 6% covers up to 5% BPS + min
-      const [royaltyCoin] = tx.splitCoins(tx.gas, [royaltyBuffer]);
-      tx.moveCall({
-        target: `${PACKAGE_ID}::royalty::pay`,
-        arguments: [
-          tx.object(TRANSFER_POLICY_ID),
-          transferRequest,
-          royaltyCoin,
-        ],
-      });
-
-      // ── 5. Confirm the transfer request (all rules satisfied) ─────────────
-      // confirm_request consumes (destroys) the hot potato TransferRequest.
-      tx.moveCall({
-        target: '0x2::transfer_policy::confirm_request',
-        typeArguments: [NFT_TYPE],
-        arguments: [
-          tx.object(TRANSFER_POLICY_ID),
-          transferRequest,
-        ],
-      });
-
-      // ── 6. Lock NFT into buyer's kiosk ────────────────────────────────────
-      // Must use kiosk::lock (not place) to re-enforce the TransferPolicy.
-      tx.moveCall({
-        target: '0x2::kiosk::lock',
-        typeArguments: [NFT_TYPE],
-        arguments: [
           kioskArg,
           capArg,
           tx.object(TRANSFER_POLICY_ID),
-          purchasedItem,
+          tx.pure.id(nft.id),
+          paymentCoin,
+          royaltyCoin,
         ],
       });
 
@@ -285,20 +247,21 @@ export default function Marketplace() {
         { transaction: tx },
         {
           onSuccess: () => {
-            toast.success('Purchase complete! NFT locked in your Kiosk with royalty paid. 🎉');
+            toast.success('Purchase complete! NFT is now in your Kiosk. 🎉');
             setSelectedNft(null);
           },
           onError: (err: any) => {
             const msg = err?.message || '';
-            if (msg.includes('EItemNotListed') || msg.includes('abort code: 5') || msg.includes('abort code: 9')) {
-              toast.error(
-                'Purchase failed: NFT is no longer listed. The seller may have delisted it.',
-                { duration: 8000 }
-              );
-            } else if (msg.includes('EInsufficientRoyalty') || msg.includes('abort code: 0')) {
-              toast.error('Royalty payment insufficient. Please try again.');
-            } else if (msg.includes('EIncorrectAmount') || msg.includes('abort code: 3')) {
-              toast.error('Payment amount incorrect. Price may have changed — please refresh.');
+            if (msg.includes('EListingNotFound') || msg.includes('abort code: 2')) {
+              toast.error('Listing no longer active. The seller may have delisted.');
+            } else if (msg.includes('EListingExpired') || msg.includes('abort code: 3')) {
+              toast.error('This listing has expired.');
+            } else if (msg.includes('ECannotBuyOwnListing')) {
+              toast.error('You cannot buy your own listing.');
+            } else if (msg.includes('EInsufficientPayment')) {
+              toast.error('Insufficient payment. Price may have changed — refresh and retry.');
+            } else if (msg.includes('EInsufficientRoyalty')) {
+              toast.error('Royalty payment insufficient.');
             } else {
               toast.error('Purchase failed: ' + (msg || 'Unknown error'));
             }
@@ -307,8 +270,7 @@ export default function Marketplace() {
         }
       );
     } catch (error: any) {
-      console.error('Buy PTB construction error:', error);
-      toast.error('Failed to construct purchase transaction: ' + (error?.message || 'Unknown error'));
+      toast.error('Failed to construct purchase: ' + (error?.message || 'Unknown error'));
       setBuying(false);
     }
   };
@@ -318,7 +280,7 @@ export default function Marketplace() {
       setAiEstimate(null);
       return;
     }
-    
+
     let isMounted = true;
     const fetchEstimate = async () => {
       setEstimating(true);
@@ -338,7 +300,7 @@ export default function Marketplace() {
         if (isMounted) setEstimating(false);
       }
     };
-    
+
     fetchEstimate();
     return () => { isMounted = false; };
   }, [selectedNft]);
@@ -356,7 +318,7 @@ export default function Marketplace() {
               </h1>
             </div>
             <p className="text-white/40 text-lg font-light max-w-xl leading-relaxed">
-              Discover and acquire rare Sui Genesis assets from the community. 
+              Discover and acquire rare Sui Genesis assets from the community.
               All sales enforce on-chain royalties.
             </p>
           </div>
@@ -378,8 +340,8 @@ export default function Marketplace() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="relative w-full md:w-96 group">
             <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-white transition-colors" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="SEARCH ASSETS"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -407,9 +369,9 @@ export default function Marketplace() {
               onClick={() => setSelectedNft(nft)}
             >
               <div className="relative aspect-3/4 overflow-hidden rounded bg-white/2">
-                <WalrusImage 
-                  src={nft.image} 
-                  alt={nft.name} 
+                <WalrusImage
+                  src={nft.image}
+                  alt={nft.name}
                   className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
                 />
                 <div className="absolute top-6 left-6">
@@ -466,7 +428,7 @@ export default function Marketplace() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="max-w-[1000px] w-full grid grid-cols-1 md:grid-cols-2 border border-white/10 bg-black relative max-h-[95vh] sm:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
-              <button 
+              <button
                 onClick={() => setSelectedNft(null)}
                 className="absolute top-4 right-4 md:top-6 md:right-6 p-2 z-10 text-white/40 hover:text-white bg-black/50 md:bg-transparent rounded-full backdrop-blur-md md:backdrop-blur-none transition-colors"
                 title="CLOSE_WINDOW"
@@ -475,18 +437,18 @@ export default function Marketplace() {
               </button>
 
               <div className="h-64 sm:h-80 md:h-auto md:aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
-                <WalrusImage 
-                  src={selectedNft.image} 
-                  alt={selectedNft.name} 
+                <WalrusImage
+                  src={selectedNft.image}
+                  alt={selectedNft.name}
                   className="w-full h-full object-cover filter contrast-125 select-none"
                 />
                 <div className="absolute top-4 left-4 md:top-6 md:left-6">
                   <RarityBadge score={selectedNft.rarityScore} />
                 </div>
               </div>
-              
+
               <div className="p-6 sm:p-8 md:p-12 lg:p-16 flex flex-col justify-between space-y-12">
-                
+
                 <div className="space-y-10">
                   <div className="space-y-4">
                     <div className={`flex items-center gap-4 ${selectedNft.isListed ? 'text-emerald-500' : 'text-amber-500'}`}>
@@ -518,6 +480,12 @@ export default function Marketplace() {
                       <p className="text-sm font-mono text-white/60 truncate" title={selectedNft.seller}>{selectedNft.seller.slice(0, 10)}..</p>
                     </div>
                   </div>
+                  {selectedNft.expiresAt > 0 && (
+                    <div className="border border-amber-500/20 p-4 space-y-1 bg-amber-500/5">
+                      <p className="text-[9px] font-medium tracking-[0.2em] text-amber-500/60 uppercase">EXPIRES_AT_EPOCH</p>
+                      <p className="text-sm font-mono text-amber-400">{selectedNft.expiresAt}</p>
+                    </div>
+                  )}
 
                   <div className="space-y-4 border-t border-white/10 pt-8">
                     <div className="flex items-center justify-between">

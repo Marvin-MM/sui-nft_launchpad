@@ -18,6 +18,12 @@ export const REWARD_MINT_CAP_ID      = import.meta.env.VITE_REWARD_MINT_CAP_ID  
 export const UPGRADE_CONFIG_ID       = import.meta.env.VITE_UPGRADE_CONFIG_ID       || '';
 export const RENTAL_POLICY_ID        = import.meta.env.VITE_RENTAL_POLICY_ID        || '';
 
+// ── New Shared Objects (post-deployment setup) ──────────────────────────────
+export const REWARD_VAULT_ID        = import.meta.env.VITE_REWARD_VAULT_ID        || '';
+export const MULTISIG_ADMIN_CAP_ID  = import.meta.env.VITE_MULTISIG_ADMIN_CAP_ID  || '';
+export const MARKETPLACE_CONFIG_ID  = import.meta.env.VITE_MARKETPLACE_CONFIG_ID  || '';
+export const PROTECTED_TP_ID        = import.meta.env.VITE_PROTECTED_TP_ID        || '';
+
 // ── Sui Framework Fixed Objects ─────────────────────────────────────────────
 // On-chain randomness oracle — same address on every Sui network.
 export const SUI_RANDOM_ID = '0x8';
@@ -25,7 +31,10 @@ export const SUI_RANDOM_ID = '0x8';
 // ── Struct Type Strings ─────────────────────────────────────────────────────
 // CORRECT: SuiNFT is in nft_app::nft, NOT mint. AdminCap is in mint.
 export const NFT_TYPE       = `${PACKAGE_ID}::nft::SuiNFT`;
-export const ADMIN_CAP_TYPE = `${PACKAGE_ID}::mint::AdminCap`;
+export const ADMIN_CAP_TYPE          = `${PACKAGE_ID}::mint::AdminCap`;
+export const MULTISIG_ADMIN_CAP_TYPE = `${PACKAGE_ID}::multisig_admin::MultiSigAdminCap`;
+export const STAKING_POOL_TYPE       = `${PACKAGE_ID}::staking::StakingPool`;
+export const REWARD_VAULT_TYPE       = `${PACKAGE_ID}::reward_vault::RewardVault`;
 // ── Reward Token Type (on-chain SGR) ───────────────────────────────────────
 // The Move module `nft_app::reward_token` registers a fungible token with
 // symbol "SGR" and 9 decimals. Clients can use this type string to query

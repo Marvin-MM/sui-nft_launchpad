@@ -100,13 +100,29 @@ export default function Mint() {
   const currentEpoch = Number(systemState?.epoch || 0);
 
   const configFields = (configData?.data?.content as any)?.fields || {};
-  const phase          = configFields.current_phase ?? 2;
+  const phase          = Number(configFields.current_phase ?? 2);
   const allowlistPrice = configFields.allowlist_price_mist || '1000000000';
-  const publicPrice    = configFields.mint_fee || '2000000000';
+  // mint_fee is TimeLockConfig<u64> — read current_value from nested fields
+  const mintFeeField   = configFields.mint_fee;
+  const publicPrice    = (typeof mintFeeField === 'object' && mintFeeField?.fields?.current_value)
+    ? String(mintFeeField.fields.current_value)
+    : (typeof mintFeeField === 'string' ? mintFeeField : '2000000000');
+  // paused is TimeLockConfig<bool>
+  const pausedField    = configFields.paused;
+  const isPaused       = (typeof pausedField === 'object' && pausedField?.fields?.current_value !== undefined)
+    ? Boolean(pausedField.fields.current_value)
+    : false;
   const maxSupply      = Number(configFields.max_supply || 0);
   const mintedCount    = Number(configFields.minted_count || 0);
+  const maxPerWalletPublic    = Number(configFields.max_per_wallet_public || 0);
+  const maxPerWalletAllowlist = Number(configFields.max_per_wallet_allowlist || 0);
   const currentPrice   = phase === 1 ? allowlistPrice : publicPrice;
   const totalPrice     = BigInt(currentPrice) * BigInt(quantity);
+  const pendingMintFee = (typeof mintFeeField === 'object' && mintFeeField?.fields?.pending_value?.fields?.vec?.length > 0)
+    ? String(mintFeeField.fields.pending_value.fields.vec[0])
+    : null;
+  const allowlistPriceSui = (Number(allowlistPrice) / 1e9).toFixed(4);
+  const publicPriceSui    = (Number(publicPrice) / 1e9).toFixed(4);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // STEP 1: Walrus Upload
@@ -164,6 +180,10 @@ export default function Mint() {
     }
     if (!nftName.trim()) {
       toast.error('Please enter a name for your NFT.');
+      return;
+    }
+    if (phase === 0 || isPaused) {
+      toast.error('Minting is currently paused by the admin.');
       return;
     }
     // Allowlist eligibility check (client-side only, contract also validates)
@@ -312,12 +332,12 @@ export default function Mint() {
                     const sorted = [...itemFields].sort(
                       (a: any, b: any) => Number(b.version || 0) - Number(a.version || 0)
                     );
-                    
+
                     // We need to ensure we don't just grab an old NFT from their existing kiosk.
                     // But if this is a fresh kiosk, any item is the new one.
                     // If it's an existing kiosk, grabbing the highest version usually works.
                     nftId = (sorted[0] as any)?.name?.value?.id || null;
-                    
+
                     if (nftId) {
                       break; // Found it!
                     }
@@ -325,7 +345,7 @@ export default function Mint() {
                 } catch (kioskErr) {
                   console.warn(`[Mint] Kiosk field query failed (attempt ${attempt + 1}):`, kioskErr);
                 }
-                
+
                 // Wait 1 second before retrying to give indexer time to catch up
                 if (!nftId) await new Promise((r) => setTimeout(r, 1000));
               }
@@ -537,9 +557,9 @@ export default function Mint() {
           </h1>
           <p className="text-white/40 font-light leading-relaxed max-w-xl">
             Protocol Cycle{' '}
-            <span className="text-white">{phase === 0 ? 'PAUSED' : phase === 1 ? 'ALLOWLIST' : 'PUBLIC'}</span>
-            {phase === 1 && ' — Restricted to allowlisted identifiers only.'}
-            {phase === 2 && ' — Public distribution is active.'}
+            <span className="text-white">{(phase === 0 || isPaused) ? 'PAUSED' : phase === 1 ? 'ALLOWLIST' : 'PUBLIC'}</span>
+            {phase === 1 && !isPaused && ' — Restricted to allowlisted identifiers only.'}
+            {phase === 2 && !isPaused && ' — Public distribution is active.'}
           </p>
         </div>
 
@@ -744,21 +764,31 @@ export default function Mint() {
                   <div className="space-y-4">
                     <p className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">STRATEGY_SELECTOR</p>
                     {[
-                      { id: 'standard', name: 'Standard distribution' },
-                      { id: 'dutch',    name: 'Incentivized auction'  },
-                      { id: 'commit',   name: 'Committed allocation'  },
-                    ].map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => setMintStrategy(s.id as any)}
-                        className={`flex items-center justify-between w-full py-2 border-b transition-all uppercase tracking-widest text-[9px] ${
-                          mintStrategy === s.id ? 'border-white text-white' : 'border-white/5 text-white/20 hover:text-white/40'
-                        }`}
-                      >
-                        {s.name}
-                        {mintStrategy === s.id && <ChevronRight className="w-3 h-3" />}
-                      </button>
-                    ))}
+                      { id: 'standard', name: 'Standard distribution', comingSoon: false },
+                      { id: 'dutch',    name: 'Incentivized auction',  comingSoon: true  },
+                      { id: 'commit',   name: 'Committed allocation',  comingSoon: true  },
+                    ].map(s => {
+                      const isDisabled = s.comingSoon;
+                      return (
+                        <button
+                          key={s.id}
+                          disabled={isDisabled}
+                          onClick={() => !isDisabled && setMintStrategy(s.id as any)}
+                          className={`flex items-center justify-between w-full py-2 border-b transition-all uppercase tracking-widest text-[9px] ${
+                            isDisabled ? 'border-white/5 text-white/10 cursor-not-allowed' :
+                            mintStrategy === s.id ? 'border-white text-white' : 'border-white/5 text-white/20 hover:text-white/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {s.name}
+                            {s.comingSoon && (
+                              <span className="bg-white/5 px-2 py-0.5 text-[7px] text-white/30 border border-white/10 rounded-sm">COMING SOON</span>
+                            )}
+                          </div>
+                          {mintStrategy === s.id && !isDisabled && <ChevronRight className="w-3 h-3" />}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="space-y-2">
                     <p className="text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">PAYLOAD_TOTAL</p>
@@ -780,7 +810,7 @@ export default function Mint() {
               )}
 
               {/* Phase paused warning */}
-              {phase === 0 && (
+              {(phase === 0 || isPaused) && (
                 <div className="flex items-center gap-3 border border-amber-500/20 p-4 bg-amber-500/5">
                   <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
                   <p className="text-[10px] font-medium tracking-[0.2em] uppercase text-amber-500">
@@ -798,7 +828,7 @@ export default function Mint() {
                 </button>
                 <button
                   onClick={() => setConfirmConfig({ isOpen: true, action: 'mint' })}
-                  disabled={minting || phase === 0}
+                  disabled={minting || phase === 0 || isPaused}
                   className="flex-1 py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   {minting ? (
@@ -926,11 +956,14 @@ export default function Mint() {
           <h3 className="text-[10px] font-medium tracking-[0.4em] text-white/40 uppercase">NETWORK_STATUS</h3>
           <div className="space-y-6">
             {[
-              { label: 'Current Epoch', value: currentEpoch.toString() },
-              { label: 'Mint Phase',    value: phase === 0 ? 'PAUSED' : phase === 1 ? 'ALLOWLIST' : 'PUBLIC' },
+              { label: 'Current Epoch',  value: currentEpoch.toString() },
+              { label: 'Mint Phase',     value: (phase === 0 || isPaused) ? 'PAUSED' : phase === 1 ? 'ALLOWLIST' : 'PUBLIC' },
+              { label: 'Minted',         value: `${mintedCount.toLocaleString()} / ${maxSupply.toLocaleString()}` },
+              { label: 'Mint Fee',       value: `${publicPriceSui} SUI${pendingMintFee ? ` (→ ${(Number(pendingMintFee) / 1e9).toFixed(4)} pending)` : ''}` },
+              { label: 'Wallet Limit',   value: phase === 1 && maxPerWalletAllowlist > 0 ? `${maxPerWalletAllowlist} (AL)` : maxPerWalletPublic > 0 ? `${maxPerWalletPublic} (PUB)` : '—' },
               { label: 'Asset Standard', value: 'SUI_NFT_0.2' },
-              { label: 'Storage Layer', value: 'WALRUS' },
-              { label: 'Gas Estimate',  value: '~0.008 SUI' },
+              { label: 'Storage Layer',  value: 'WALRUS' },
+              { label: 'Gas Estimate',   value: '~0.008 SUI' },
             ].map(item => (
               <div key={item.label} className="flex justify-between items-baseline border-b border-white/5 pb-4">
                 <p className="text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">{item.label}</p>

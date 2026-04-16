@@ -5,7 +5,7 @@ import { Search, Filter, Repeat, Clock, Coins, X, Info, Loader2, Calendar, Shiel
 import RarityBadge from '../components/RarityBadge';
 import { toast } from 'react-hot-toast';
 import WalrusImage from '../components/WalrusImage';
-import { NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, RENTAL_POLICY_ID } from '../lib/sui';
+import { NFT_TYPE, PACKAGE_ID, MIST_PER_SUI, RENTAL_POLICY_ID, MARKETPLACE_CONFIG_ID } from '../lib/sui';
 import { Transaction } from '@mysten/sui/transactions';
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useKiosk } from '../hooks/useKiosk';
@@ -16,6 +16,9 @@ export default function RentalMarketplace() {
   const [selectedNft, setSelectedNft] = useState<any | null>(null);
   const [renting, setRenting] = useState(false);
   const [duration, setDuration] = useState(1);
+  const [returning, setReturning] = useState(false);
+  const [accessTokenId, setAccessTokenId] = useState('');
+  const [reclaiming, setReclaiming] = useState(false);
   const suiClient = useSuiClient();
   const { mutate: signAndExecute } = useSignAndExecuteTransaction();
   const { kioskId, kioskCapId } = useKiosk();
@@ -49,9 +52,9 @@ export default function RentalMarketplace() {
           };
           return nftId;
         });
-      
+
       if (objectIds.length === 0) return;
-      
+
       setLoadingObjects(true);
       try {
         const res = await suiClient.multiGetObjects({
@@ -77,7 +80,7 @@ export default function RentalMarketplace() {
       const content = obj.data?.content as any;
       const display = obj.data?.display?.data as any;
       const info = obj._rentalInfo || {};
-      
+
       return {
         id: obj.data?.objectId,
         name: display?.name || content?.fields?.name || 'Sui Genesis NFT',
@@ -95,7 +98,7 @@ export default function RentalMarketplace() {
     });
   }, [objectsData]);
 
-  const filteredRentals = rentals.filter(nft => 
+  const filteredRentals = rentals.filter(nft =>
     nft.name.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -148,6 +151,75 @@ export default function RentalMarketplace() {
     }
   };
 
+  const handleReturn = async (nft: any) => {
+    if (!account || !accessTokenId) {
+      toast.error('Enter your RentalAccessToken object ID.');
+      return;
+    }
+    setReturning(true);
+    try {
+      const tx = new Transaction();
+      // rental::return_rental(lender_kiosk, nft_id, access_token)
+      tx.moveCall({
+        target: `${PACKAGE_ID}::rental::return_rental`,
+        arguments: [
+          tx.object(nft.lenderKioskId),
+          tx.pure.id(nft.id),
+          tx.object(accessTokenId), // RentalAccessToken owned object
+        ],
+      });
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: () => {
+            toast.success('Rental returned successfully.');
+            setSelectedNft(null);
+            setAccessTokenId('');
+          },
+          onError: (e: any) => toast.error('Return failed: ' + e.message),
+          onSettled: () => setReturning(false),
+        }
+      );
+    } catch (e: any) {
+      toast.error('Failed to construct return transaction.');
+      setReturning(false);
+    }
+  };
+
+  const handleReclaim = async (nft: any) => {
+    if (!account) return;
+    setReclaiming(true);
+    try {
+      const tx = new Transaction();
+      // reclaim_expired(kiosk, kiosk_cap, nft_id)
+      tx.moveCall({
+        target: `${PACKAGE_ID}::rental::reclaim_expired`,
+        arguments: [
+          tx.object(nft.lenderKioskId),
+          tx.object(nft.lenderKioskCapId || kioskCapId),
+          tx.pure.id(nft.id),
+        ],
+      });
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: () => toast.success('Expired rental reclaimed.'),
+          onError: (e: any) => {
+            if (e.message?.includes('ENotExpired')) {
+              toast.error('Rental period has not ended yet.');
+            } else {
+              toast.error('Reclaim failed: ' + e.message);
+            }
+          },
+          onSettled: () => setReclaiming(false),
+        }
+      );
+    } catch (e: any) {
+      toast.error('Failed to construct reclaim transaction.');
+      setReclaiming(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-black text-white selection:bg-accent-primary/30">
       <div className="max-w-7xl mx-auto px-6 py-24 space-y-24">
@@ -182,8 +254,8 @@ export default function RentalMarketplace() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="relative w-full md:w-96 group">
             <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-white transition-colors" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="SEARCH RENTALS"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -211,9 +283,9 @@ export default function RentalMarketplace() {
               onClick={() => setSelectedNft(nft)}
             >
               <div className="relative aspect-3/4 overflow-hidden rounded bg-white/2">
-                <WalrusImage 
-                  src={nft.image} 
-                  alt={nft.name} 
+                <WalrusImage
+                  src={nft.image}
+                  alt={nft.name}
                   className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
                 />
                 <div className="absolute top-6 left-6">
@@ -259,7 +331,7 @@ export default function RentalMarketplace() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="max-w-[900px] w-full grid grid-cols-1 md:grid-cols-2 border border-white/10 bg-black overflow-hidden relative"
             >
-              <button 
+              <button
                 onClick={() => setSelectedNft(null)}
                 className="absolute top-6 right-6 p-2 z-10 text-white/40 hover:text-white transition-colors"
                 title="CLOSE_WINDOW"
@@ -268,9 +340,9 @@ export default function RentalMarketplace() {
               </button>
 
               <div className="aspect-square border-r border-b md:border-b-0 border-white/10 bg-white/1 relative group">
-                <WalrusImage 
-                  src={selectedNft.image} 
-                  alt={selectedNft.name} 
+                <WalrusImage
+                  src={selectedNft.image}
+                  alt={selectedNft.name}
                   className="w-full h-full object-cover filter contrast-125 select-none"
                 />
                 <div className="absolute top-6 left-6">
@@ -304,10 +376,10 @@ export default function RentalMarketplace() {
                       <span className="text-[9px] text-white/20 uppercase tracking-widest">{selectedNft.maxDuration} EPOCHS MAX</span>
                     </div>
                     <div className="flex items-center gap-6">
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max={selectedNft.maxDuration} 
+                      <input
+                        type="range"
+                        min="1"
+                        max={selectedNft.maxDuration}
                         value={duration}
                         onChange={(e) => setDuration(parseInt(e.target.value))}
                         className="flex-1 h-1 bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-none"
@@ -325,7 +397,7 @@ export default function RentalMarketplace() {
                       Issuance of a <span className="text-white">RentalAccessToken</span> bounds utility access for {duration} epochs. Asset remains locked in lender's primary kiosk for duration.
                     </p>
                   </div>
-                  
+
                   <div className="flex justify-between items-end border-t border-white/10 pt-8">
                     <div className="space-y-1">
                       <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-white/40">PAYLOAD_TOTAL</p>
@@ -345,7 +417,7 @@ export default function RentalMarketplace() {
                     <span>Protocol rental issuance</span>
                     <span>Secure Kiosk Lock</span>
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleRent(selectedNft)}
                     disabled={renting}
                     className="w-full py-6 bg-white text-black font-medium tracking-[0.4em] uppercase hover:bg-black hover:text-white border border-white transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-4"
@@ -362,6 +434,32 @@ export default function RentalMarketplace() {
                       </>
                     )}
                   </button>
+
+                  {/* Return Rental Section */}
+                  <div className="pt-6 border-t border-white/10 space-y-4">
+                    <p className="text-[10px] font-medium tracking-[0.4em] text-white/20 uppercase">RETURN_RENTAL</p>
+                    <input
+                      type="text"
+                      placeholder="ACCESS_TOKEN_OBJECT_ID"
+                      value={accessTokenId}
+                      onChange={(e) => setAccessTokenId(e.target.value)}
+                      className="w-full py-3 px-4 bg-transparent border border-white/10 focus:outline-none focus:border-white transition-colors text-xs font-mono text-white placeholder-white/20"
+                    />
+                    <button
+                      onClick={() => handleReturn(selectedNft)}
+                      disabled={returning || !accessTokenId}
+                      className="w-full py-4 border border-white/30 text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-white/5 transition-all disabled:opacity-40"
+                    >
+                      {returning ? 'RETURNING...' : 'RETURN_RENTAL'}
+                    </button>
+                    <button
+                      onClick={() => handleReclaim(selectedNft)}
+                      disabled={reclaiming}
+                      className="w-full py-3 border border-orange-500/30 text-orange-500 text-[10px] font-medium tracking-[0.4em] uppercase hover:bg-orange-500/10 transition-all disabled:opacity-40"
+                    >
+                      {reclaiming ? 'RECLAIMING...' : 'RECLAIM_EXPIRED (LENDER)'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>

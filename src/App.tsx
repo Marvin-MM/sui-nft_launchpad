@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import Admin from './pages/Admin';
 import Navbar from './components/Navbar';
 import LiveFeed from './components/LiveFeed';
+import FeedbackWidget from './components/FeedbackWidget';
 import Footer from './components/Footer';
 
 const queryClient = new QueryClient();
@@ -40,7 +41,8 @@ export default function App() {
               </main>
               <Footer />
               <LiveFeed />
-              <Toaster 
+              <FeedbackWidget />
+              <Toaster
                 position="bottom-right"
                 toastOptions={{
                   style: {
@@ -58,4 +60,3 @@ export default function App() {
     </QueryClientProvider>
   );
 }
-

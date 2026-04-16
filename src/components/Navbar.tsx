@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ConnectModal, useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
+import { ConnectModal, useCurrentAccount, useDisconnectWallet, useSuiClientQuery } from '@mysten/dapp-kit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, ShoppingBag, BarChart3, Settings, Wallet, Coins, Repeat, Menu, X, Terminal, Activity, ChevronDown } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import useRewardToken from '../hooks/useRewardToken';
+import { ADMIN_CAP_TYPE } from '../lib/sui';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -28,6 +29,17 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
 
   const { balance: sgrBalance, loading: sgrLoading, symbol: sgrSymbol } = useRewardToken();
+
+  /* ── AdminCap Query ─────────────────────────────────────────────────── */
+  const { data: adminCapData } = useSuiClientQuery(
+    'getOwnedObjects',
+    {
+      owner: account?.address || '',
+      filter: { StructType: ADMIN_CAP_TYPE },
+    },
+    { enabled: !!account }
+  );
+  const isAdmin = !!(adminCapData?.data && adminCapData.data.length > 0);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -73,7 +85,9 @@ export default function Navbar() {
                   <Link to="/marketplace" className={cn("relative z-10 flex items-center gap-3 text-[10px] font-medium uppercase tracking-[0.4em] p-3 hover:bg-white/5 transition-colors", location.pathname === '/marketplace' ? "text-white bg-white/5" : "text-white/40 hover:text-white")}><ShoppingBag className="w-4 h-4" /> Market</Link>
                   <Link to="/rentals" className={cn("relative z-10 flex items-center gap-3 text-[10px] font-medium uppercase tracking-[0.4em] p-3 hover:bg-white/5 transition-colors", location.pathname === '/rentals' ? "text-white bg-white/5" : "text-white/40 hover:text-white")}><Repeat className="w-4 h-4" /> Rentals</Link>
                   <Link to="/analytics" className={cn("relative z-10 flex items-center gap-3 text-[10px] font-medium uppercase tracking-[0.4em] p-3 hover:bg-white/5 transition-colors", location.pathname === '/analytics' ? "text-white bg-white/5" : "text-white/40 hover:text-white")}><BarChart3 className="w-4 h-4" /> Stats</Link>
-                  <Link to="/admin" className={cn("relative z-10 flex items-center gap-3 text-[10px] font-medium uppercase tracking-[0.4em] p-3 hover:bg-white/5 transition-colors", location.pathname === '/admin' ? "text-white bg-white/5" : "text-white/40 hover:text-white")}><Settings className="w-4 h-4" /> Admin</Link>
+                  {isAdmin && (
+                    <Link to="/admin" className={cn("relative z-10 flex items-center gap-3 text-[10px] font-medium uppercase tracking-[0.4em] p-3 hover:bg-white/5 transition-colors", location.pathname === '/admin' ? "text-white bg-white/5" : "text-white/40 hover:text-white")}><Settings className="w-4 h-4" /> Admin</Link>
+                  )}
                 </div>
               </div>
             </div>
@@ -145,6 +159,7 @@ export default function Navbar() {
 
             <div className="flex flex-col gap-4">
               {navItems.map((item, idx) => {
+                if (item.name === 'Admin' && !isAdmin) return null;
                 const isActive = location.pathname === item.path;
                 const Icon = item.icon;
                 return (

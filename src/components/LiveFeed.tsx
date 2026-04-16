@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSuiClientQuery } from '@mysten/dapp-kit';
 import { NETWORK, PACKAGE_ID } from '../lib/sui';
-import { Activity, ExternalLink } from 'lucide-react';
+import { Activity, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function LiveFeed() {
+  const [isOpen, setIsOpen] = useState(true);
+
   // Fetch real events from the package events module
   const { data: eventData } = useSuiClientQuery(
     'queryEvents',
@@ -33,19 +35,30 @@ export default function LiveFeed() {
   return (
     <div className="fixed bottom-6 left-6 z-40 w-80 pointer-events-none hidden md:block">
       <div className="flex flex-col gap-2">
+        <div 
+          className="bg-black border border-emerald-500/50 p-3 w-fit pointer-events-auto flex items-center justify-between cursor-pointer hover:bg-emerald-500/5 transition-colors shadow-2xl"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          <div className="flex items-center gap-3">
+            <Activity className="w-4 h-4 text-emerald-500" />
+            <span className="text-[10px] font-medium tracking-[0.2em] text-white uppercase">Live Activity</span>
+          </div>
+          {isOpen ? <ChevronDown className="w-4 h-4 text-white/40 hover:text-white transition-colors" /> : <ChevronUp className="w-4 h-4 text-white/40 hover:text-white transition-colors" />}
+        </div>
+
         <AnimatePresence mode="popLayout">
-          {events.map((event) => (
+          {isOpen && events.map((event) => (
             <motion.div
               key={event.id}
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-black border border-emerald-500/50 p-4 pointer-events-auto flex items-center gap-4 shadow-2xl transition-all hover:bg-emerald-500/5"
+              initial={{ opacity: 0, y: 20, scale: 0.95, height: 0 }}
+              animate={{ opacity: 1, y: 0, scale: 1, height: 'auto' }}
+              exit={{ opacity: 0, scale: 0.95, height: 0 }}
+              className="bg-black border border-emerald-500/50 p-1 pointer-events-auto flex items-center gap-4 shadow-2xl transition-all hover:bg-emerald-500/5 overflow-hidden"
             >
               <div className="w-10 h-10 border border-emerald-500 flex items-center justify-center text-emerald-500 bg-emerald-500/10 shrink-0">
                 <Activity className="w-4 h-4" />
               </div>
-              <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex-1 min-w-0 space-y-1 py-2">
                 <p className="text-[10px] font-medium tracking-[0.2em] text-white uppercase truncate">
                   {event.nftName} MINTED
                 </p>
@@ -57,7 +70,7 @@ export default function LiveFeed() {
                 href={`https://suiscan.xyz/${NETWORK}/tx/${event.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-white/20 hover:text-white transition-colors"
+                className="pr-4 text-white/20 hover:text-white transition-colors"
                 title="View on Suiscan"
               >
                 <ExternalLink className="w-4 h-4" />
